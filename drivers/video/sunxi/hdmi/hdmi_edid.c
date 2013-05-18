@@ -389,8 +389,8 @@ static int probe_ddc_edid(struct i2c_adapter *adapter,
 		return -EIO;
 	}
 
-	if (i2c_transfer(adapter, msgs, 2) == 2)
-		return 0;
+	//if (i2c_transfer(adapter, msgs, 2) == 2)
+	//	return 0;
 
 	dev_warn(&adapter->dev, "unable to read EDID block.\n");
 	return -EIO;
