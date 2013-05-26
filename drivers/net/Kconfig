@@ -2023,6 +2023,7 @@ config LANTIQ_ETOP
 	help
 	  Support for the MII0 inside the Lantiq SoC
 
+source "drivers/net/wiznet/Kconfig"
 
 source "drivers/net/fs_enet/Kconfig"
 
