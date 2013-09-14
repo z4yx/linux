@@ -44,7 +44,7 @@
 
 #ifdef CONFIG_PLATFORM_ARM_SUN4I
 	#ifndef CONFIG_IOCTL_CFG80211 
-		#define CONFIG_IOCTL_CFG80211 1
+/*		#define CONFIG_IOCTL_CFG80211 1 */
 	#endif
 #endif
 
@@ -156,7 +156,7 @@
 
 #define CONFIG_SKB_COPY	1//for amsdu
 
-//#define CONFIG_LED
+#define CONFIG_LED
 #ifdef CONFIG_LED
 	#define CONFIG_SW_LED
 	#ifdef CONFIG_SW_LED
@@ -328,7 +328,7 @@
 //#define CONFIG_DEBUG_RTL871X
 
 #define DBG	1
-//#define CONFIG_DEBUG_RTL819X
+#define CONFIG_DEBUG_RTL819X
 
 #define CONFIG_PROC_DEBUG	1
 

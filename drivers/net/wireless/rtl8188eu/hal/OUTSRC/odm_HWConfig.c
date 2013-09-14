@@ -271,7 +271,7 @@ odm_SignalScaleMapping_92CSeries(
 		{
 			RetSig = CurrSig;
 		}
-	}
+	}
 #endif
 	return RetSig;
 }
