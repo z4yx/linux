@@ -11,7 +11,7 @@
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
@@ -43,8 +43,10 @@ static __inline int mmc_pm_gpio_ctrl(char* name, int level) {return -1;}
 static __inline int mmc_pm_get_io_val(char* name) {return -1;}
 #endif
 
+static int bt_power_gpio_hdle;
+
 static DEFINE_SPINLOCK(bt_power_lock);
-static const char bt_name[] = "bcm4329";
+static const char bt_name[] = "bluetooth";
 static struct rfkill *sw_rfkill;
 static int rfkill_set_power(void *data, bool blocked)
 {
@@ -81,7 +83,22 @@ static int rfkill_set_power(void *data, bool blocked)
             }
             break;
         default:
-            RF_MSG("no bt module matched !!\n");
+            if(bt_power_gpio_hdle) {
+                if(!blocked) {
+                    if(EGPIO_SUCCESS != gpio_write_one_pin_value(bt_power_gpio_hdle, 1, "bt_wakeup")){
+                        RF_MSG("rfkill_set_power: err when operate gpio. \n");
+                    }else{
+                        RF_MSG("rfkill_set_power: set BT wakeup 1 \n");
+                    }
+                }
+                else {
+                    if(EGPIO_SUCCESS != gpio_write_one_pin_value(bt_power_gpio_hdle, 0, "bt_wakeup")){
+                        RF_MSG("rfkill_set_power: err when operate gpio. \n");
+                    }
+                }
+            }else {
+                RF_MSG("no bt module matched !!\n");
+            }
     }
 
     spin_unlock(&bt_power_lock);
@@ -131,18 +148,37 @@ static struct platform_device sw_rfkill_dev = {
     .name = "sunxi-rfkill",
 };
 
+static int sw_bt_fetch_para(void)
+{
+    int bt_used = -1;
+
+    if(SCRIPT_PARSER_OK != script_parser_fetch("bt_para", "bt_used", &bt_used, 1)){
+        return 1;
+    }
+    if(1 != bt_used){
+        return 1;
+    }
+    
+    bt_power_gpio_hdle = gpio_request_ex("bt_para", "bt_wakeup");
+
+    RF_MSG("bt_power_gpio_hdle = %d. \n", bt_power_gpio_hdle);
+
+    return bt_power_gpio_hdle ? 0 : 1;
+}
+
 static int __init sw_rfkill_init(void)
 {
-	unsigned int mod_sel = mmc_pm_get_mod_type();
+    unsigned int mod_sel = mmc_pm_get_mod_type();
 
-	switch (mod_sel) {
-	case 2: /* usi bm01a */
-	case 5: /* swb b23 */
-	case 6: /* huawei mw269x */
-		break;
-	default:
-		return -ENODEV;
-	}
+    switch (mod_sel) {
+    case 2: /* usi bm01a */
+    case 5: /* swb b23 */
+    case 6: /* huawei mw269x */
+        break;
+    default:
+        if(sw_bt_fetch_para())
+            return -ENODEV;
+    }
 
     platform_device_register(&sw_rfkill_dev);
     return platform_driver_register(&sw_rfkill_driver);
@@ -150,6 +186,9 @@ static int __init sw_rfkill_init(void)
 
 static void __exit sw_rfkill_exit(void)
 {
+    if(bt_power_gpio_hdle)
+        gpio_release(bt_power_gpio_hdle, 2);
+
     platform_device_unregister(&sw_rfkill_dev);
     platform_driver_unregister(&sw_rfkill_driver);
 }
@@ -160,4 +199,3 @@ module_exit(sw_rfkill_exit);
 MODULE_DESCRIPTION("sunxi-rfkill driver");
 MODULE_AUTHOR("Aaron.yemao<leafy.myeh@allwinnertech.com>");
 MODULE_LICENSE(GPL);
-
