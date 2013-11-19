@@ -1,7 +1,7 @@
 /*
  * Misc system wide definitions
  *
- * Copyright (C) 1999-2013, Broadcom Corporation
+ * Copyright (C) 1999-2012, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: bcmdefs.h 416231 2013-08-02 07:38:34Z $
+ * $Id: bcmdefs.h 316830 2012-02-23 20:29:22Z $
  */
 
 #ifndef	_bcmdefs_h_
@@ -65,22 +65,9 @@
 #define	BCMNMIATTACHFN(_fn)	_fn
 #define	BCMNMIATTACHDATA(_data)	_data
 #define CONST	const
-
-/* Do not put BCM47XX and __ARM_ARCH_7A__ to the same line.
- * DHD build has problem because the BCM47XX will be excluded in DHD release.
- */
-#undef BCM47XX_CA9
-#ifdef __ARM_ARCH_7A__
-#define BCM47XX_CA9
-#endif /* __ARM_ARCH_7A__ */
 #ifndef BCMFASTPATH
-#if defined(BCM47XX_CA9)
-#define BCMFASTPATH		__attribute__ ((__section__ (".text.fastpath")))
-#define BCMFASTPATH_HOST	__attribute__ ((__section__ (".text.fastpath_host")))
-#else
 #define BCMFASTPATH
 #define BCMFASTPATH_HOST
-#endif
 #endif /* BCMFASTPATH */
 
 
@@ -206,13 +193,9 @@ typedef struct {
 
 #if defined(BCM_RPC_NOCOPY) || defined(BCM_RCP_TXNOCOPY)
 /* add 40 bytes to allow for extra RPC header and info  */
-#define BCMEXTRAHDROOM 260
+#define BCMEXTRAHDROOM 220
 #else /* BCM_RPC_NOCOPY || BCM_RPC_TXNOCOPY */
-#if defined(BCM47XX_CA9)
-#define BCMEXTRAHDROOM 224
-#else
-#define BCMEXTRAHDROOM 204
-#endif /* linux && BCM47XX_CA9 */
+#define BCMEXTRAHDROOM 172
 #endif /* BCM_RPC_NOCOPY || BCM_RPC_TXNOCOPY */
 
 /* Packet alignment for most efficient SDIO (can change based on platform) */
