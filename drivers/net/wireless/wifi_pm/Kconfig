@@ -1,0 +1,3 @@
+config AW_WIFI_PM
+	tristate "Allwinner wifi power management"
+	default y
