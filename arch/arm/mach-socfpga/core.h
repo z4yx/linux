@@ -47,7 +47,6 @@
 
 #define RSTMGR_MPUMODRST_CPU1		0x2     /* CPU1 Reset */
 
-extern void socfpga_secondary_startup(void);
 extern void __iomem *socfpga_scu_base_addr;
 
 /*MPU Module Reset Register */
