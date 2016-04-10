@@ -1,0 +1,3 @@
+platform-$(CONFIG_MACH_THINPAD) += thinpad/
+cflags-$(CONFIG_MACH_THINPAD) += -I$(srctree)/arch/mips/include/asm/mach-thinpad
+load-$(CONFIG_MACH_THINPAD) += 0xffffffff80100000

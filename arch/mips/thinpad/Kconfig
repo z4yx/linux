@@ -1,0 +1,9 @@
+choice
+	prompt "Machine type"
+	depends on MACH_THINPAD
+	default THINPAD_SPANTAN6
+
+config THINPAD_SPANTAN6
+	bool "Thinpad with Spantan6 by LiShanshan"
+
+endchoice

@@ -6,6 +6,7 @@ dts-dirs	+= mti
 dts-dirs	+= netlogic
 dts-dirs	+= pic32
 dts-dirs	+= qca
+dts-dirs	+= thinpad
 dts-dirs	+= ralink
 dts-dirs	+= xilfpga
 

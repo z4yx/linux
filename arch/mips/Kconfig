@@ -976,6 +976,25 @@ config MIPS_PARAVIRT
 	help
 	  This option supports guest running under ????
 
+config MACH_THINPAD
+	bool "Tsinghua Thinpad board"
+	select BOOT_ELF32
+	select BOOT_RAW
+	select BUILTIN_DTB
+	select CEVT_R4K
+	select COMMON_CLK
+	select CSRC_R4K
+	select IRQ_MIPS_CPU
+	select LIBFDT
+	select MIPS_CPU_SCACHE
+	select SYS_HAS_EARLY_PRINTK
+	select SYS_HAS_CPU_MIPS32_R1
+	select SYS_SUPPORTS_32BIT_KERNEL
+	select SYS_SUPPORTS_LITTLE_ENDIAN
+	select USE_OF
+	select USE_GENERIC_EARLY_PRINTK_8250
+	help
+	  This enables support for the Tsinghua University Thinpad platform.
 endchoice
 
 source "arch/mips/alchemy/Kconfig"
@@ -994,6 +1013,7 @@ source "arch/mips/pmcs-msp71xx/Kconfig"
 source "arch/mips/ralink/Kconfig"
 source "arch/mips/sgi-ip27/Kconfig"
 source "arch/mips/sibyte/Kconfig"
+source "arch/mips/thinpad/Kconfig"
 source "arch/mips/txx9/Kconfig"
 source "arch/mips/vr41xx/Kconfig"
 source "arch/mips/cavium-octeon/Kconfig"
