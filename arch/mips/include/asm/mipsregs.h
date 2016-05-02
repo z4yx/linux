@@ -1995,10 +1995,30 @@ static inline void tlb_write_indexed(void)
 
 static inline void tlb_write_random(void)
 {
-	__asm__ __volatile__(
+/*	__asm__ __volatile__(
 		".set noreorder\n\t"
 		"tlbwr\n\t"
 		".set reorder");
+*/
+
+  static int random = 0;
+  static int numTlbs = -1;
+  unsigned int wired;
+  if (unlikely(numTlbs == -1)){
+    numTlbs = ((read_c0_config1() & MIPS_CONF1_TLBS) >> 25) + 1;
+  }
+  wired = read_c0_wired();
+  if (random < wired){
+    random = wired;
+  }
+  if (random >= numTlbs){
+    random = wired;
+  }
+  write_c0_index(random);
+  mtc0_tlbw_hazard();
+  tlb_write_indexed();
+  random ++;
+
 }
 
 /*

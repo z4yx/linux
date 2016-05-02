@@ -279,6 +279,8 @@ static inline void dump_handler(const char *symbol, const u32 *handler, int coun
 
 /* Some CP0 registers */
 #define C0_INDEX	0, 0
+#define C0_WIRED	6, 0
+#define C0_RANDOM	1, 0
 #define C0_ENTRYLO0	2, 0
 #define C0_TCBIND	2, 2
 #define C0_ENTRYLO1	3, 0
@@ -1241,6 +1243,7 @@ build_fast_tlb_refill_handler (u32 **p, struct uasm_label **l,
 
 static void build_r4000_tlb_refill_handler(void)
 {
+	static int __random = 0;
 	u32 *p = tlb_handler;
 	struct uasm_label *l = labels;
 	struct uasm_reloc *r = relocs;
@@ -1292,7 +1295,17 @@ static void build_r4000_tlb_refill_handler(void)
 
 		build_get_ptep(&p, K0, K1);
 		build_update_entries(&p, K0, K1);
-		build_tlb_write_entry(&p, &l, &r, tlb_random);
+		uasm_i_lui(&p, K0, ((int)(&__random) >> 16));
+		uasm_i_addiu(&p, K0, K0, (int)&__random & 0xffff);
+		uasm_i_lw(&p, K1, 0, K0);
+		uasm_i_xori(&p, K1, K1, 1);
+	  uasm_i_sw(&p, K1, 0, K0);
+		uasm_i_mfc0(&p, K0, C0_WIRED);
+		uasm_i_addu(&p, K0, K1, K0);
+		uasm_i_mtc0(&p, K0, C0_INDEX);
+		uasm_i_nop(&p);
+		uasm_i_nop(&p);
+		build_tlb_write_entry(&p, &l, &r, tlb_indexed);
 		uasm_l_leave(&l, p);
 		uasm_i_eret(&p); /* return from trap */
 	}
