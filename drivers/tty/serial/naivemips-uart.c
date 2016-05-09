@@ -504,8 +504,8 @@ static struct console naivemips_console = {
 static struct uart_driver naivemips_usart_driver = {
     .driver_name    = DRIVER_NAME,
     .dev_name   = NAIVEMIPS_SERIAL_NAME,
-    .major      = 0,
-    .minor      = 0,
+    .major      = TTY_MAJOR,
+    .minor      = 64,
     .nr     = NAIVEMIPS_MAX_PORTS,
     .cons       = STM32_SERIAL_CONSOLE,
 };
@@ -548,4 +548,5 @@ module_exit(usart_exit);
 
 MODULE_ALIAS("platform:" DRIVER_NAME);
 MODULE_DESCRIPTION("NaiveMIPS serial port driver");
+MODULE_ALIAS_CHARDEV_MAJOR(TTY_MAJOR);
 MODULE_LICENSE("GPL v2");
