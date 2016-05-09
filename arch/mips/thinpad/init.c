@@ -18,7 +18,8 @@
 
 #include <asm/prom.h>
 
-#define EARLY_PRINT_UART_BASE	0xbfd003f8
+#define EARLY_PRINT_UART_DR	((uint32_t*)0xbfd003f8)
+#define EARLY_PRINT_UART_SR	((uint32_t*)0xbfd003fc)
 
 const char *get_system_type(void)
 {
@@ -31,9 +32,14 @@ void __init plat_mem_setup(void)
 	strlcpy(arcs_cmdline, boot_command_line, COMMAND_LINE_SIZE);
 }
 
+void prom_putchar(char c)
+{
+	while(!(readl(EARLY_PRINT_UART_SR) & 1));
+	writel(c, EARLY_PRINT_UART_DR);
+}
+
 void __init prom_init(void)
 {
-	setup_8250_early_printk_port(EARLY_PRINT_UART_BASE, 2, 50000);
 }
 
 void __init prom_free_prom_memory(void)
@@ -60,7 +66,7 @@ static int __init plat_of_setup(void)
 }
 arch_initcall(plat_of_setup);
 
-
+/*
 static struct plat_serial8250_port uart8250_data[] = {
 	{
 		.mapbase	= 0x1fd003F8,	
@@ -72,13 +78,28 @@ static struct plat_serial8250_port uart8250_data[] = {
 	},
 	{ },
 };
+*/
 
-static struct platform_device thinpad_uart8250_device = {
-	.name			= "serial8250",
-	.id			= PLAT8250_DEV_PLATFORM,
-	.dev			= {
-		.platform_data	= uart8250_data,
+static struct resource uart_resources[] = {
+	[0] = {
+		.start = 0x1fd003F8,
+		.end = 0x1fd003F8+7,
+		.flags = IORESOURCE_MEM
 	},
+	[1] = {
+		.start = 4,
+		.end = 4,
+		.flags = IORESOURCE_IRQ
+	}
+};
+static struct platform_device thinpad_uart8250_device = {
+	.name			= "naivemips-uart",
+	.id			=     0,
+	.resource=uart_resources,
+	.num_resources=ARRAY_SIZE(uart_resources),
+	// .dev			= {
+	// 	.platform_data	= uart8250_data,
+	// },
 };
 
 static struct platform_device *thinpad_devices[] __initdata = {
