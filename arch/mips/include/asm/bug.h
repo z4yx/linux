@@ -26,8 +26,8 @@ static inline void  __BUG_ON(unsigned long condition)
 		else
 			return;
 	}
-	// __asm__ __volatile__("tne $0, %0, %1"
-	// 		     : : "r" (condition), "i" (BRK_BUG));
+	__asm__ __volatile__("tne $0, %0, %1"
+			     : : "r" (condition), "i" (BRK_BUG));
 }
 
 #define BUG_ON(C) __BUG_ON((unsigned long)(C))
