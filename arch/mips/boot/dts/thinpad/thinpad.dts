@@ -24,7 +24,7 @@
 
 	memory {
 		device_type = "memory";
-		reg = <0x0 0x1000000>;
+		reg = <0x0 0x800000>;
 	};
 
 	cpuintc: interrupt-controller@0 {
@@ -57,5 +57,5 @@
 };
 
 &ext {
-	clock-frequency = <50000000>;
+	clock-frequency = <8000000>;
 };
