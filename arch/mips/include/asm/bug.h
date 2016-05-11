@@ -4,7 +4,7 @@
 #include <linux/compiler.h>
 #include <asm/sgidefs.h>
 
-#ifdef CONFIG_BUG
+#if 0
 
 #include <asm/break.h>
 
