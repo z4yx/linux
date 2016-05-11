@@ -40,6 +40,7 @@ void prom_putchar(char c)
 
 void __init prom_init(void)
 {
+	writel(0, EARLY_PRINT_UART_SR);
 }
 
 void __init prom_free_prom_memory(void)
