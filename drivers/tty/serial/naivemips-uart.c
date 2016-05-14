@@ -232,8 +232,6 @@ static int naivemips_startup(struct uart_port *port)
     val = USART_SR_TXEIE|USART_SR_RXNEIE;
     naivemips_set_bits(port, USART_SR, val);
 
-    printk(KERN_INFO"%s\n", __func__);
-
     return 0;
 }
 
