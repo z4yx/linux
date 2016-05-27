@@ -44,7 +44,7 @@
 		serial0: serial@0x1fd003F8 {
 			device_type = "serial";
 			compatible = "tsinghua,naivemips-uart";
-			reg = <0x1fd003F8 7>;
+			reg = <0x1fd003F8 8>;
 			clock-frequency = <1843200>;
 			interrupt-parent = <&cpuintc>;
 			interrupts = <4>;

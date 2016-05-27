@@ -44,7 +44,7 @@
 		serial0: serial@0xbfd003E0 {
 			device_type = "serial";
 			compatible = "altr,uart-1.0";
-			reg = <0xbfd003E0 0x1f>;
+			reg = <0xbfd003E0 0x20>;
 			current-speed = <115200>;
 			clock-frequency = <30000000>;
 			interrupt-parent = <&cpuintc>;
@@ -53,7 +53,7 @@
 
 		led_pio: gpio@0xbfd00400 {
 			compatible = "altr,pio-1.0";
-			reg = <0xbfd00400 0xf>;
+			reg = <0xbfd00400 0x10>;
 			altr,ngpio = <32>;
 			resetvalue = <0xaa>;
 			#gpio-cells = <2>;
@@ -62,7 +62,7 @@
 
 		button_pio: gpio@0xbfd00410 {
 			compatible = "altr,pio-1.0";
-			reg = <0xbfd00410 0xf>;
+			reg = <0xbfd00410 0x10>;
 			altr,ngpio = <32>;
 			resetvalue = <0>;
 			#gpio-cells = <2>;
