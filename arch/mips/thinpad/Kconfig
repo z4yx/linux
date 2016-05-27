@@ -6,4 +6,7 @@ choice
 config THINPAD_SPANTAN6
 	bool "Thinpad with Spantan6 by LiShanshan"
 
+config DE2I_CYCLONE4
+	bool "Terasic DE2i development board"
+
 endchoice

@@ -990,6 +990,8 @@ config MACH_THINPAD
 	select SYS_HAS_CPU_MIPS32_R1
 	select SYS_SUPPORTS_32BIT_KERNEL
 	select SYS_SUPPORTS_LITTLE_ENDIAN
+	select PINCTRL
+	select ARCH_WANT_OPTIONAL_GPIOLIB
 	select USE_OF
 	help
 	  This enables support for the Tsinghua University Thinpad platform.

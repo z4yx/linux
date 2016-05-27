@@ -1,0 +1,78 @@
+/dts-v1/;
+
+
+/ {
+	compatible = "Tsinghua,NaiveMIPS,DE2i";
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "mips,4Kc";
+			clocks	= <&ext>;
+			reg = <0>;
+		};
+	};
+
+	ext: ext {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+	};
+
+	memory {
+		device_type = "memory";
+		reg = <0x0 0x8000000>;
+	};
+
+	cpuintc: interrupt-controller@0 {
+		#address-cells = <0>;
+		#interrupt-cells = <1>;
+		interrupt-controller;
+		compatible = "mti,cpu-interrupt-controller";
+	};
+	
+	soc{
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		#interrupt-cells = <1>;
+		ranges;
+		
+		serial0: serial@0xbfd003E0 {
+			device_type = "serial";
+			compatible = "altr,uart-1.0";
+			reg = <0xbfd003E0 0x1f>;
+			current-speed = <115200>;
+			clock-frequency = <30000000>;
+			interrupt-parent = <&cpuintc>;
+			interrupts = <4>;
+		};
+
+		led_pio: gpio@0xbfd00400 {
+			compatible = "altr,pio-1.0";
+			reg = <0xbfd00400 0xf>;
+			altr,ngpio = <32>;
+			resetvalue = <0xaa>;
+			#gpio-cells = <2>;
+			gpio-controller;
+		};
+
+		button_pio: gpio@0xbfd00410 {
+			compatible = "altr,pio-1.0";
+			reg = <0xbfd00410 0xf>;
+			altr,ngpio = <32>;
+			resetvalue = <0>;
+			#gpio-cells = <2>;
+			gpio-controller;
+		};
+	};
+
+	
+};
+
+&ext {
+	clock-frequency = <30000000>;
+};
