@@ -69,6 +69,28 @@
 			gpio-controller;
 		};
 
+
+		i2c0: ocores@0xbc010000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "opencores,i2c-ocores";
+			reg = <0xbc010000 0x20>;
+			interrupt-parent = <&cpuintc>;
+			interrupts = <5>;
+			clocks = <&ext>;
+			clock-frequency = <100000>; /* i2c bus frequency 100 KHz */
+
+			reg-shift = <2>;	/* 32 bit registers */
+			reg-io-width = <1>;	/* 8 bit read/write */
+
+			adxl345@53 {
+				compatible = "adi,adxl345";
+				reg = <0x53>;
+				interrupt-parent = <&cpuintc>;
+				interrupts = <6>;
+			};
+		};
+
 		rgmii_0_eth_tse_0: ethernet@0xbc000000 {
 			compatible = "altr,tse-msgdma-1.0", "altr,tse-1.0";
 			reg = <0xbc000000 0x00000400>,
