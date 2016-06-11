@@ -1,5 +1,6 @@
 /dts-v1/;
 
+#include <dt-bindings/interrupt-controller/irq.h>
 
 / {
 	compatible = "Tsinghua,NaiveMIPS,DE2i";
@@ -69,8 +70,8 @@
 			gpio-controller;
 			interrupt-parent = <&cpuintc>;
 			interrupts = <6>;
-			altr,interrupt-type = <4>; //IRQ_TYPE_LEVEL_HIGH
-			#interrupt-cells = <1>;
+			altr,interrupt-type = <IRQ_TYPE_LEVEL_HIGH>;
+			#interrupt-cells = <2>;
 			interrupt-controller;
 		};
 
@@ -92,7 +93,7 @@
 				compatible = "adi,adxl345";
 				reg = <0x53>;
 				interrupt-parent = <&button_pio>;
-				interrupts = <17>;
+				interrupts = <17 IRQ_TYPE_LEVEL_HIGH>;
 			};
 		};
 
