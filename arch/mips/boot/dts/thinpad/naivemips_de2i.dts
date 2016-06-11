@@ -122,8 +122,10 @@
 				compatible = "altr,tse-mdio";
 				#address-cells = <1>;
 				#size-cells = <0>;
-				phy0: ethernet-phy@0 {
-					reg = <0>;
+				phy0: ethernet-phy@16 {
+					//MARVELL_PHY_ID_88E1111 0x01410cc0 "ethernet-phy-id0141.0cc0",
+					compatible = "ethernet-phy-ieee802.3-c22";
+					reg = <16>;
 					device_type = "ethernet-phy";
 				};
 			};
