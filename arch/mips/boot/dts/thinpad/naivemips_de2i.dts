@@ -93,7 +93,7 @@
 				compatible = "adi,adxl345";
 				reg = <0x53>;
 				interrupt-parent = <&button_pio>;
-				interrupts = <17 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <31 IRQ_TYPE_LEVEL_HIGH>;
 			};
 		};
 

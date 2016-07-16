@@ -15,6 +15,7 @@
 #include <linux/module.h>
 #include <linux/irq.h>
 #include <linux/platform_device.h>
+#include <linux/usb/sl811.h>
 
 #include <asm/prom.h>
 
@@ -23,6 +24,50 @@
 #define EARLY_PRINT_UART_SR	((uint32_t*)0xbfd003fc)
 #elif CONFIG_DE2I_CYCLONE4
 #define EARLY_PRINT_UART_BASE  0xbfd003e0
+#endif
+
+#if IS_ENABLED(CONFIG_USB_SL811_HCD)
+static struct resource sl811_hcd_resources[] = {
+	{
+		.start = 0xbc020000,
+		.end = 0xbc020000,
+		.flags = IORESOURCE_MEM,
+	}, {
+		.start = 0xbc020004,
+		.end = 0xbc020004,
+		.flags = IORESOURCE_MEM,
+	}, {
+		.start = 8+30,
+		.end = 8+30,
+		.flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL,
+	},
+};
+
+#if defined(CONFIG_USB_SL811_BFIN_USE_VBUS)
+void sl811_port_power(struct device *dev, int is_on)
+{
+	// gpio_request(CONFIG_USB_SL811_BFIN_GPIO_VBUS, "usb:SL811_VBUS");
+	// gpio_direction_output(CONFIG_USB_SL811_BFIN_GPIO_VBUS, is_on);
+}
+#endif
+
+static struct sl811_platform_data sl811_priv = {
+	.potpg = 10,
+	.power = 250,       /* == 500mA */
+#if defined(CONFIG_USB_SL811_BFIN_USE_VBUS)
+	.port_power = &sl811_port_power,
+#endif
+};
+
+static struct platform_device sl811_hcd_device = {
+	.name = "sl811-hcd",
+	.id = 0,
+	.dev = {
+		.platform_data = &sl811_priv,
+	},
+	.num_resources = ARRAY_SIZE(sl811_hcd_resources),
+	.resource = sl811_hcd_resources,
+};
 #endif
 
 const char *get_system_type(void)
@@ -75,6 +120,10 @@ static int __init plat_of_setup(void)
 
 	if (of_platform_populate(NULL, of_default_bus_match_table, NULL, NULL))
 		panic("Failed to populate DT");
+
+#ifdef CONFIG_USB_SL811_HCD
+	platform_device_register(&sl811_hcd_device);
+#endif
 
 	return 0;
 }
