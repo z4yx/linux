@@ -97,6 +97,26 @@
 			};
 		};
 
+		spi: spi@0xbc030000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			cell-index = <0>;
+			compatible = "altr,spi-1.0";
+			reg = <0xbc030000 0x20>;
+			//interrupts = <29 IRQ_TYPE_LEVEL_HIGH>;
+			//interrupt-parent = <&button_pio>;
+
+			mmc-slot@0 {
+				compatible = "fsl,mpc8323rdb-mmc-slot",
+					     "mmc-spi-slot";
+				reg = <0>;
+				//gpios = <&qe_pio_d 14 1
+				//	 &qe_pio_d 15 0>;
+				voltage-ranges = <3300 3300>;
+				spi-max-frequency = <4000000>;
+			};
+		};
+
 		rgmii_0_eth_tse_0: ethernet@0xbc000000 {
 			compatible = "altr,tse-msgdma-1.0";
 			reg = <0xbc000000 0x00000400>,
@@ -114,8 +134,6 @@
 			address-bits = <48>;
 			max-frame-size = <1518>;
 			local-mac-address = [00 00 00 00 00 00];
-			altr,enable-sup-addr = <1>;
-			altr,enable-hash = <1>;
 			phy-mode = "rgmii-id";
 			phy-handle = <&phy0>;
 			rgmii_0_eth_tse_0_mdio: mdio {
