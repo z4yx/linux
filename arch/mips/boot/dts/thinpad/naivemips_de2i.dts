@@ -7,6 +7,10 @@
 	#address-cells = <1>;
 	#size-cells = <1>;
 
+	chosen {
+		bootargs = "console=ttyAL0,115200n8 rdinit=/sbin/init";
+	};
+
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;
