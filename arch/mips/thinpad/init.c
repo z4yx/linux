@@ -19,10 +19,10 @@
 
 #include <asm/prom.h>
 
-#ifdef CONFIG_THINPAD_SPANTAN6
+#if defined CONFIG_THINPAD_SPANTAN6
 #define EARLY_PRINT_UART_DR	((uint32_t*)0xbfd003f8)
 #define EARLY_PRINT_UART_SR	((uint32_t*)0xbfd003fc)
-#elif CONFIG_DE2I_CYCLONE4
+#elif defined (CONFIG_DE2I_CYCLONE4) || defined (CONFIG_DE1SOC_CYCLONE5)
 #define EARLY_PRINT_UART_BASE  0xbfd003e0
 #endif
 
@@ -83,10 +83,10 @@ void __init plat_mem_setup(void)
 
 void prom_putchar(char c)
 {
-#ifdef CONFIG_THINPAD_SPANTAN6
+#if defined CONFIG_THINPAD_SPANTAN6
 	while(!(readl(EARLY_PRINT_UART_SR) & 1));
 	writel(c, EARLY_PRINT_UART_DR);
-#elif CONFIG_DE2I_CYCLONE4
+#elif defined (CONFIG_DE2I_CYCLONE4) || defined (CONFIG_DE1SOC_CYCLONE5)
 	while(!(readl((uint32_t*)(EARLY_PRINT_UART_BASE+8)) & 0x40));
 	writel(c, (uint32_t*)(EARLY_PRINT_UART_BASE+4));
 #endif
@@ -94,9 +94,9 @@ void prom_putchar(char c)
 
 void __init prom_init(void)
 {
-#ifdef CONFIG_THINPAD_SPANTAN6
+#if defined CONFIG_THINPAD_SPANTAN6
 	writel(0, EARLY_PRINT_UART_SR);
-#elif CONFIG_DE2I_CYCLONE4
+#elif defined (CONFIG_DE2I_CYCLONE4) || defined (CONFIG_DE1SOC_CYCLONE5)
 	writel(0, (uint32_t*)(EARLY_PRINT_UART_BASE+0xc));
 #endif
 }
@@ -121,7 +121,7 @@ static int __init plat_of_setup(void)
 	if (of_platform_populate(NULL, of_default_bus_match_table, NULL, NULL))
 		panic("Failed to populate DT");
 
-#ifdef CONFIG_USB_SL811_HCD
+#if defined CONFIG_USB_SL811_HCD
 	platform_device_register(&sl811_hcd_device);
 #endif
 

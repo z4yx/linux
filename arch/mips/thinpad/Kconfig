@@ -9,4 +9,7 @@ config THINPAD_SPANTAN6
 config DE2I_CYCLONE4
 	bool "Terasic DE2i development board"
 
+config DE1SOC_CYCLONE5
+    bool "Terasic DE1-SoC development board"
+
 endchoice
