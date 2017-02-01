@@ -19,26 +19,31 @@
 
 #include <asm/prom.h>
 
-#ifdef CONFIG_THINPAD_SPANTAN6
+#if IS_ENABLED(CONFIG_THINPAD_SPANTAN6) || IS_ENABLED(CONFIG_THINPAD_NG_ARTIX7)
 #define EARLY_PRINT_UART_DR	((uint32_t*)0xbfd003f8)
 #define EARLY_PRINT_UART_SR	((uint32_t*)0xbfd003fc)
-#elif CONFIG_DE2I_CYCLONE4
+#elif IS_ENABLED(CONFIG_DE2I_CYCLONE4)
 #define EARLY_PRINT_UART_BASE  0xbfd003e0
 #endif
 
 #if IS_ENABLED(CONFIG_USB_SL811_HCD)
 static struct resource sl811_hcd_resources[] = {
 	{
-		.start = 0xbc020000,
-		.end = 0xbc020000,
+		.start = 0x1c020000,
+		.end = 0x1c020000,
 		.flags = IORESOURCE_MEM,
 	}, {
-		.start = 0xbc020004,
-		.end = 0xbc020004,
+		.start = 0x1c020004,
+		.end = 0x1c020004,
 		.flags = IORESOURCE_MEM,
 	}, {
+#if IS_ENABLED(CONFIG_DE2I_CYCLONE4)
 		.start = 8+30,
 		.end = 8+30,
+#else
+		.start = 5,
+		.end = 5,
+#endif
 		.flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL,
 	},
 };
@@ -83,10 +88,10 @@ void __init plat_mem_setup(void)
 
 void prom_putchar(char c)
 {
-#ifdef CONFIG_THINPAD_SPANTAN6
+#if IS_ENABLED(CONFIG_THINPAD_SPANTAN6) || IS_ENABLED(CONFIG_THINPAD_NG_ARTIX7)
 	while(!(readl(EARLY_PRINT_UART_SR) & 1));
 	writel(c, EARLY_PRINT_UART_DR);
-#elif CONFIG_DE2I_CYCLONE4
+#elif IS_ENABLED(CONFIG_DE2I_CYCLONE4)
 	while(!(readl((uint32_t*)(EARLY_PRINT_UART_BASE+8)) & 0x40));
 	writel(c, (uint32_t*)(EARLY_PRINT_UART_BASE+4));
 #endif
@@ -94,9 +99,9 @@ void prom_putchar(char c)
 
 void __init prom_init(void)
 {
-#ifdef CONFIG_THINPAD_SPANTAN6
+#if IS_ENABLED(CONFIG_THINPAD_SPANTAN6) || IS_ENABLED(CONFIG_THINPAD_NG_ARTIX7)
 	writel(0, EARLY_PRINT_UART_SR);
-#elif CONFIG_DE2I_CYCLONE4
+#elif IS_ENABLED(CONFIG_DE2I_CYCLONE4)
 	writel(0, (uint32_t*)(EARLY_PRINT_UART_BASE+0xc));
 #endif
 }

@@ -4,7 +4,10 @@ choice
 	default THINPAD_SPANTAN6
 
 config THINPAD_SPANTAN6
-	bool "Thinpad with Spantan6 by LiShanshan"
+    bool "Thinpad with Spantan6 by LiShanshan"
+
+config THINPAD_NG_ARTIX7
+    bool "Thinpad-NG with Artix7"
 
 config DE2I_CYCLONE4
 	bool "Terasic DE2i development board"
