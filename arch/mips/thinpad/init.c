@@ -16,6 +16,7 @@
 #include <linux/irq.h>
 #include <linux/platform_device.h>
 #include <linux/usb/sl811.h>
+#include <linux/usb/isp1362.h>
 
 #include <asm/prom.h>
 
@@ -26,7 +27,7 @@
 #define EARLY_PRINT_UART_BASE  0xbfd003e0
 #endif
 
-#if IS_ENABLED(CONFIG_USB_SL811_HCD)
+#if IS_ENABLED(CONFIG_USB_SL811_HCD) || IS_ENABLED(CONFIG_USB_ISP1362_HCD)
 static struct resource sl811_hcd_resources[] = {
 	{
 		.start = 0x1c020000,
@@ -44,10 +45,16 @@ static struct resource sl811_hcd_resources[] = {
 		.start = 5,
 		.end = 5,
 #endif
+//#if IS_ENABLED(CONFIG_USB_SL811_HCD)
 		.flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL,
+//#else
+//		.flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE,
+//#endif
 	},
 };
+#endif
 
+#if IS_ENABLED(CONFIG_USB_SL811_HCD)
 #if defined(CONFIG_USB_SL811_BFIN_USE_VBUS)
 void sl811_port_power(struct device *dev, int is_on)
 {
@@ -69,6 +76,29 @@ static struct platform_device sl811_hcd_device = {
 	.id = 0,
 	.dev = {
 		.platform_data = &sl811_priv,
+	},
+	.num_resources = ARRAY_SIZE(sl811_hcd_resources),
+	.resource = sl811_hcd_resources,
+};
+#endif //CONFIG_USB_SL811_HCD
+
+#if IS_ENABLED(CONFIG_USB_ISP1362_HCD)
+static struct isp1362_platform_data isp1362_priv = {
+	.sel15Kres = 1,
+	.clknotstop = 0,
+	.oc_enable = 0,
+	.int_act_high = 1,
+	.int_edge_triggered = 0,
+	.remote_wakeup_connected = 0,
+	.no_power_switching = 1,
+	.power_switching_mode = 0,
+};
+
+static struct platform_device isp1362_hcd_device = {
+	.name = "isp1362-hcd",
+	.id = 0,
+	.dev = {
+		.platform_data = &isp1362_priv,
 	},
 	.num_resources = ARRAY_SIZE(sl811_hcd_resources),
 	.resource = sl811_hcd_resources,
@@ -128,6 +158,9 @@ static int __init plat_of_setup(void)
 
 #ifdef CONFIG_USB_SL811_HCD
 	platform_device_register(&sl811_hcd_device);
+#endif
+#if IS_ENABLED(CONFIG_USB_ISP1362_HCD)
+	platform_device_register(&isp1362_hcd_device);
 #endif
 
 	return 0;
