@@ -12,4 +12,7 @@ config THINPAD_NG_ARTIX7
 config DE2I_CYCLONE4
 	bool "Terasic DE2i development board"
 
+config FPGA_A7_NSCSCC
+    bool "FPGA-A7 board for NSCSCC"
+
 endchoice

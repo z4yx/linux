@@ -25,6 +25,8 @@
 #define EARLY_PRINT_UART_SR	((uint32_t*)0xbfd003fc)
 #elif IS_ENABLED(CONFIG_DE2I_CYCLONE4)
 #define EARLY_PRINT_UART_BASE  0xbfd003e0
+#elif IS_ENABLED(CONFIG_FPGA_A7_NSCSCC)
+#define EARLY_PRINT_UART_BASE  0xbfd03000
 #endif
 
 #if IS_ENABLED(CONFIG_USB_SL811_HCD) || IS_ENABLED(CONFIG_USB_ISP1362_HCD)
@@ -124,6 +126,9 @@ void prom_putchar(char c)
 #elif IS_ENABLED(CONFIG_DE2I_CYCLONE4)
 	while(!(readl((uint32_t*)(EARLY_PRINT_UART_BASE+8)) & 0x40));
 	writel(c, (uint32_t*)(EARLY_PRINT_UART_BASE+4));
+#elif IS_ENABLED(CONFIG_FPGA_A7_NSCSCC)
+	while(!(readl((uint32_t*)(EARLY_PRINT_UART_BASE+0x14)) & 0x20)); //LSR
+	writel(c, (uint32_t*)(EARLY_PRINT_UART_BASE+0));
 #endif
 }
 
@@ -133,6 +138,15 @@ void __init prom_init(void)
 	writel(0, EARLY_PRINT_UART_SR);
 #elif IS_ENABLED(CONFIG_DE2I_CYCLONE4)
 	writel(0, (uint32_t*)(EARLY_PRINT_UART_BASE+0xc));
+#elif IS_ENABLED(CONFIG_FPGA_A7_NSCSCC)
+	//Uart16550 initialize
+	writel(0, (uint32_t*)(EARLY_PRINT_UART_BASE+8)); //Turn off FIFO
+	writel(0x80, (uint32_t*)(EARLY_PRINT_UART_BASE+0xc)); //DLAB=1
+	writel(54, (uint32_t*)(EARLY_PRINT_UART_BASE+0)); //DLL=54=100000000/(16*115200)
+	writel(0, (uint32_t*)(EARLY_PRINT_UART_BASE+4)); //DLM=0
+	writel(3, (uint32_t*)(EARLY_PRINT_UART_BASE+0xc)); //DLAB=0,8N1 Mode
+	writel(0, (uint32_t*)(EARLY_PRINT_UART_BASE+4)); //IER=0
+	writel(0, (uint32_t*)(EARLY_PRINT_UART_BASE+0x10)); //MCR=0
 #endif
 }
 

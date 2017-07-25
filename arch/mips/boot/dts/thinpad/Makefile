@@ -1,6 +1,7 @@
 dtb-$(CONFIG_THINPAD_SPANTAN6)	+= naivemips_thinpad.dtb
 dtb-$(CONFIG_THINPAD_NG_ARTIX7)	+= naivemips_thinpad.dtb
 dtb-$(CONFIG_DE2I_CYCLONE4)	+= naivemips_de2i.dtb
+dtb-$(CONFIG_FPGA_A7_NSCSCC)	+= naivemips_nscscc.dtb
 
 obj-y				+= $(patsubst %.dtb, %.dtb.o, $(dtb-y))
 
