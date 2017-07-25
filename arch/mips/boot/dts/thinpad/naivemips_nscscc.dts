@@ -8,7 +8,7 @@
 	#size-cells = <1>;
 
 	chosen {
-		bootargs = "console=ttyS0,115200n8 rdinit=/sbin/init";
+		bootargs = "cca=0 console=ttyS0,115200n8 rdinit=/sbin/init uio_pdrv_genirq.of_id=lcd";
 	};
 
 	cpus {
@@ -29,7 +29,7 @@
 
 	memory {
 		device_type = "memory";
-		reg = <0x0 0x8000000>;
+		reg = <0x0 0x2000000>;
 	};
 
 	cpuintc: interrupt-controller@0 {
@@ -57,7 +57,12 @@
 			interrupt-parent = <&cpuintc>;
 			interrupts = <4>;
 		};
-/*
+		
+		lcd0: lcd@0xbb000000 {
+			compatible = "lcd";
+			reg = <0x1b000000 0x1000>;
+		};
+
 		sw_led: gpio@0xbfd01000 {
 			#gpio-cells = <2>;
 			compatible = "xlnx,xps-gpio-1.00.a";
@@ -80,7 +85,32 @@
 			reg = <0x1e000000 0x10000>;
 			xlnx,num-ss-bits = <0x1>;
 		};
-		*/
+		axi_ethernetlite: ethernet@1c030000 {
+			compatible = "xlnx,xps-ethernetlite-3.00.a";
+			device_type = "network";
+			local-mac-address = [08 86 4C 0D F7 09];
+			phy-handle = <&phy0>;
+			reg = <0x1c030000 0x10000>;
+			xlnx,duplex = <0x1>;
+			xlnx,include-global-buffers = <0x1>;
+			xlnx,include-internal-loopback = <0x0>;
+			xlnx,include-mdio = <0x1>;
+			xlnx,instance = "axi_ethernetlite_inst";
+			xlnx,rx-ping-pong = <0x1>;
+			xlnx,s-axi-id-width = <0x1>;
+			xlnx,tx-ping-pong = <0x1>;
+			xlnx,use-internal = <0x0>;
+			interrupt-parent = <&cpuintc>;
+			interrupts = <2>;
+			mdio {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				phy0: phy@1 {
+					device_type = "ethernet-phy";
+					reg = <1>;
+				} ;
+			} ;
+	    } ;
 	};
 
 	
