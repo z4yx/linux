@@ -29,7 +29,7 @@
 
 	memory {
 		device_type = "memory";
-		reg = <0x0 0x2000000>;
+		reg = <0x0 0x8000000>;
 	};
 
 	cpuintc: interrupt-controller@0 {
@@ -58,9 +58,9 @@
 			interrupts = <4>;
 		};
 		
-		lcd0: lcd@0xbb000000 {
+		lcd0: lcd@0x1c060000 {
 			compatible = "lcd";
-			reg = <0x1b000000 0x1000>;
+			reg = <0x1c060000 0x1000>;
 		};
 
 		sw_led: gpio@0xbfd01000 {
@@ -85,6 +85,19 @@
 			reg = <0x1e000000 0x10000>;
 			xlnx,num-ss-bits = <0x1>;
 		};
+		altr_intc: altr_intc@1c070000 {
+			compatible = "altr,pio-1.0";
+			reg = <0x1c070000 0x1000>;
+			altr,ngpio = <32>;
+			resetvalue = <0>;
+			#gpio-cells = <2>;
+			gpio-controller;
+			interrupt-parent = <&cpuintc>;
+			interrupts = <2>;
+			altr,interrupt-type = <IRQ_TYPE_EDGE_RISING>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+		};
 		axi_ethernetlite: ethernet@1c030000 {
 			compatible = "xlnx,xps-ethernetlite-3.00.a";
 			device_type = "network";
@@ -100,8 +113,8 @@
 			xlnx,s-axi-id-width = <0x1>;
 			xlnx,tx-ping-pong = <0x1>;
 			xlnx,use-internal = <0x0>;
-			interrupt-parent = <&cpuintc>;
-			interrupts = <2>;
+			interrupt-parent = <&altr_intc>;
+			interrupts = <0 IRQ_TYPE_EDGE_RISING>;
 			mdio {
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -117,5 +130,5 @@
 };
 
 &ext {
-	clock-frequency = <10000000>;
+	clock-frequency = <40000000>;
 };
