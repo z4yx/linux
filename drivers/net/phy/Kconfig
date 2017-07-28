@@ -263,6 +263,11 @@ config MDIO_BCM_UNIMAC
 	  controllers as well as some Broadcom Ethernet switches such as the
 	  Starfighter 2 switches.
 
+config XILINX_PHY
+	tristate "Drivers for xilinx PHYs"
+	help
+	  This module provides a driver for the Xilinx PCS/PMA Core.
+
 config MDIO_BCM_IPROC
 	tristate "Broadcom iProc MDIO bus controller"
 	depends on ARCH_BCM_IPROC || COMPILE_TEST
@@ -270,6 +275,13 @@ config MDIO_BCM_IPROC
 	help
 	  This module provides a driver for the MDIO busses found in the
 	  Broadcom iProc SoC's.
+
+config XILINX_GMII2RGMII
+       tristate "Xilinx GMII2RGMII converter driver"
+       ---help---
+         This driver support xilinx GMII to RGMII IP core it provides
+         the Reduced Gigabit Media Independent Interface(RGMII) between
+         Ethernet physical media devices and the Gigabit Ethernet controller.
 
 endif # PHYLIB
 
