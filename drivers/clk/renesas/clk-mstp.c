@@ -37,12 +37,14 @@
  * @smstpcr: module stop control register
  * @mstpsr: module stop status register (optional)
  * @lock: protects writes to SMSTPCR
+ * @width_8bit: registers are 8-bit, not 32-bit
  */
 struct mstp_clock_group {
 	struct clk_onecell_data data;
 	void __iomem *smstpcr;
 	void __iomem *mstpsr;
 	spinlock_t lock;
+	bool width_8bit;
 };
 
 /**
@@ -59,6 +61,18 @@ struct mstp_clock {
 
 #define to_mstp_clock(_hw) container_of(_hw, struct mstp_clock, hw)
 
+static inline u32 cpg_mstp_read(struct mstp_clock_group *group,
+				u32 __iomem *reg)
+{
+	return group->width_8bit ? readb(reg) : clk_readl(reg);
+}
+
+static inline void cpg_mstp_write(struct mstp_clock_group *group, u32 val,
+				  u32 __iomem *reg)
+{
+	group->width_8bit ? writeb(val, reg) : clk_writel(val, reg);
+}
+
 static int cpg_mstp_clock_endisable(struct clk_hw *hw, bool enable)
 {
 	struct mstp_clock *clock = to_mstp_clock(hw);
@@ -70,12 +84,12 @@ static int cpg_mstp_clock_endisable(struct clk_hw *hw, bool enable)
 
 	spin_lock_irqsave(&group->lock, flags);
 
-	value = clk_readl(group->smstpcr);
+	value = cpg_mstp_read(group, group->smstpcr);
 	if (enable)
 		value &= ~bitmask;
 	else
 		value |= bitmask;
-	clk_writel(value, group->smstpcr);
+	cpg_mstp_write(group, value, group->smstpcr);
 
 	spin_unlock_irqrestore(&group->lock, flags);
 
@@ -83,7 +97,7 @@ static int cpg_mstp_clock_endisable(struct clk_hw *hw, bool enable)
 		return 0;
 
 	for (i = 1000; i > 0; --i) {
-		if (!(clk_readl(group->mstpsr) & bitmask))
+		if (!(cpg_mstp_read(group, group->mstpsr) & bitmask))
 			break;
 		cpu_relax();
 	}
@@ -114,9 +128,9 @@ static int cpg_mstp_clock_is_enabled(struct clk_hw *hw)
 	u32 value;
 
 	if (group->mstpsr)
-		value = clk_readl(group->mstpsr);
+		value = cpg_mstp_read(group, group->mstpsr);
 	else
-		value = clk_readl(group->smstpcr);
+		value = cpg_mstp_read(group, group->smstpcr);
 
 	return !(value & BIT(clock->bit_index));
 }
@@ -167,7 +181,7 @@ static void __init cpg_mstp_clocks_init(struct device_node *np)
 	unsigned int i;
 
 	group = kzalloc(sizeof(*group), GFP_KERNEL);
-	clks = kmalloc(MSTP_MAX_CLOCKS * sizeof(*clks), GFP_KERNEL);
+	clks = kmalloc_array(MSTP_MAX_CLOCKS, sizeof(*clks), GFP_KERNEL);
 	if (group == NULL || clks == NULL) {
 		kfree(group);
 		kfree(clks);
@@ -187,6 +201,9 @@ static void __init cpg_mstp_clocks_init(struct device_node *np)
 		kfree(clks);
 		return;
 	}
+
+	if (of_device_is_compatible(np, "renesas,r7s72100-mstp-clocks"))
+		group->width_8bit = true;
 
 	for (i = 0; i < MSTP_MAX_CLOCKS; ++i)
 		clks[i] = ERR_PTR(-ENOENT);
@@ -243,9 +260,7 @@ static void __init cpg_mstp_clocks_init(struct device_node *np)
 }
 CLK_OF_DECLARE(cpg_mstp_clks, "renesas,cpg-mstp-clocks", cpg_mstp_clocks_init);
 
-
-#ifdef CONFIG_PM_GENERIC_DOMAINS_OF
-int cpg_mstp_attach_dev(struct generic_pm_domain *domain, struct device *dev)
+int cpg_mstp_attach_dev(struct generic_pm_domain *unused, struct device *dev)
 {
 	struct device_node *np = dev->of_node;
 	struct of_phandle_args clkspec;
@@ -297,7 +312,7 @@ fail_put:
 	return error;
 }
 
-void cpg_mstp_detach_dev(struct generic_pm_domain *domain, struct device *dev)
+void cpg_mstp_detach_dev(struct generic_pm_domain *unused, struct device *dev)
 {
 	if (!list_empty(&dev->power.subsys_data->clock_list))
 		pm_clk_destroy(dev);
@@ -318,12 +333,10 @@ void __init cpg_mstp_add_clk_domain(struct device_node *np)
 		return;
 
 	pd->name = np->name;
-
 	pd->flags = GENPD_FLAG_PM_CLK;
-	pm_genpd_init(pd, &simple_qos_governor, false);
 	pd->attach_dev = cpg_mstp_attach_dev;
 	pd->detach_dev = cpg_mstp_detach_dev;
+	pm_genpd_init(pd, &pm_domain_always_on_gov, false);
 
 	of_genpd_add_provider_simple(np, pd);
 }
-#endif /* !CONFIG_PM_GENERIC_DOMAINS_OF */

@@ -273,6 +273,7 @@ static int gpio_nand_probe(struct platform_device *pdev)
 	nand_set_flash_node(chip, pdev->dev.of_node);
 	chip->IO_ADDR_W		= chip->IO_ADDR_R;
 	chip->ecc.mode		= NAND_ECC_SOFT;
+	chip->ecc.algo		= NAND_ECC_HAMMING;
 	chip->options		= gpiomtd->plat.options;
 	chip->chip_delay	= gpiomtd->plat.chip_delay;
 	chip->cmd_ctrl		= gpio_nand_cmd_ctrl;
@@ -285,10 +286,9 @@ static int gpio_nand_probe(struct platform_device *pdev)
 	if (gpio_is_valid(gpiomtd->plat.gpio_nwp))
 		gpio_direction_output(gpiomtd->plat.gpio_nwp, 1);
 
-	if (nand_scan(mtd, 1)) {
-		ret = -ENXIO;
+	ret = nand_scan(mtd, 1);
+	if (ret)
 		goto err_wp;
-	}
 
 	if (gpiomtd->plat.adjust_parts)
 		gpiomtd->plat.adjust_parts(&gpiomtd->plat, mtd->size);

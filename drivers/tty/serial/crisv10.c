@@ -28,7 +28,6 @@ static char *serial_version = "$Revision: 1.25 $";
 #include <linux/bitops.h>
 #include <linux/seq_file.h>
 #include <linux/delay.h>
-#include <linux/module.h>
 #include <linux/uaccess.h>
 #include <linux/io.h>
 
@@ -2599,7 +2598,7 @@ startup(struct e100_serial * info)
 
 	/* if it was already initialized, skip this */
 
-	if (info->port.flags & ASYNC_INITIALIZED) {
+	if (tty_port_initialized(&info->port)) {
 		local_irq_restore(flags);
 		free_page(xmit_page);
 		return 0;
@@ -2703,7 +2702,7 @@ startup(struct e100_serial * info)
 	e100_rts(info, 1);
 	e100_dtr(info, 1);
 
-	info->port.flags |= ASYNC_INITIALIZED;
+	tty_port_set_initialized(&info->port, 1);
 
 	local_irq_restore(flags);
 	return 0;
@@ -2745,7 +2744,7 @@ shutdown(struct e100_serial * info)
 		info->tr_running = 0;
 	}
 
-	if (!(info->port.flags & ASYNC_INITIALIZED))
+	if (!tty_port_initialized(&info->port))
 		return;
 
 #ifdef SERIAL_DEBUG_OPEN
@@ -2776,7 +2775,7 @@ shutdown(struct e100_serial * info)
 	if (info->port.tty)
 		set_bit(TTY_IO_ERROR, &info->port.tty->flags);
 
-	info->port.flags &= ~ASYNC_INITIALIZED;
+	tty_port_set_initialized(&info->port, 0);
 	local_irq_restore(flags);
 }
 
@@ -3214,8 +3213,6 @@ get_serial_info(struct e100_serial * info,
 	 * should set them to something else than 0.
 	 */
 
-	if (!retinfo)
-		return -EFAULT;
 	memset(&tmp, 0, sizeof(tmp));
 	tmp.type = info->type;
 	tmp.line = info->line;
@@ -3273,9 +3270,9 @@ set_serial_info(struct e100_serial *info,
 	info->port.low_latency = (info->port.flags & ASYNC_LOW_LATENCY) ? 1 : 0;
 
  check_and_exit:
-	if (info->port.flags & ASYNC_INITIALIZED) {
+	if (tty_port_initialized(&info->port))
 		change_speed(info);
-	} else
+	else
 		retval = startup(info);
 	return retval;
 }
@@ -3445,7 +3442,7 @@ rs_ioctl(struct tty_struct *tty,
 	if ((cmd != TIOCGSERIAL) && (cmd != TIOCSSERIAL) &&
 	    (cmd != TIOCSERCONFIG) && (cmd != TIOCSERGWILD)  &&
 	    (cmd != TIOCSERSWILD) && (cmd != TIOCSERGSTRUCT)) {
-		if (tty->flags & (1 << TTY_IO_ERROR))
+		if (tty_io_error(tty))
 			return -EIO;
 	}
 
@@ -3628,7 +3625,7 @@ rs_close(struct tty_struct *tty, struct file * filp)
 	e100_disable_rx(info);
 	e100_disable_rx_irq(info);
 
-	if (info->port.flags & ASYNC_INITIALIZED) {
+	if (tty_port_initialized(&info->port)) {
 		/*
 		 * Before we drop DTR, make sure the UART transmitter
 		 * has completely drained; this is especially
@@ -3648,8 +3645,8 @@ rs_close(struct tty_struct *tty, struct file * filp)
 			schedule_timeout_interruptible(info->port.close_delay);
 		wake_up_interruptible(&info->port.open_wait);
 	}
-	info->port.flags &= ~ASYNC_NORMAL_ACTIVE;
 	local_irq_restore(flags);
+	tty_port_set_active(&info->port, 0);
 
 	/* port closed */
 
@@ -3732,7 +3729,7 @@ rs_hangup(struct tty_struct *tty)
 	shutdown(info);
 	info->event = 0;
 	info->port.count = 0;
-	info->port.flags &= ~ASYNC_NORMAL_ACTIVE;
+	tty_port_set_active(&info->port, 0);
 	info->port.tty = NULL;
 	wake_up_interruptible(&info->port.open_wait);
 }
@@ -3755,9 +3752,8 @@ block_til_ready(struct tty_struct *tty, struct file * filp,
 	 * If non-blocking mode is set, or the port is not enabled,
 	 * then make the check up front and then exit.
 	 */
-	if ((filp->f_flags & O_NONBLOCK) ||
-	    (tty->flags & (1 << TTY_IO_ERROR))) {
-		info->port.flags |= ASYNC_NORMAL_ACTIVE;
+	if ((filp->f_flags & O_NONBLOCK) || tty_io_error(tty)) {
+		tty_port_set_active(&info->port, 1);
 		return 0;
 	}
 
@@ -3788,8 +3784,7 @@ block_til_ready(struct tty_struct *tty, struct file * filp,
 		e100_dtr(info, 1);
 		local_irq_restore(flags);
 		set_current_state(TASK_INTERRUPTIBLE);
-		if (tty_hung_up_p(filp) ||
-		    !(info->port.flags & ASYNC_INITIALIZED)) {
+		if (tty_hung_up_p(filp) || !tty_port_initialized(&info->port)) {
 #ifdef SERIAL_DO_RESTART
 			if (info->port.flags & ASYNC_HUP_NOTIFY)
 				retval = -EAGAIN;
@@ -3826,7 +3821,7 @@ block_til_ready(struct tty_struct *tty, struct file * filp,
 #endif
 	if (retval)
 		return retval;
-	info->port.flags |= ASYNC_NORMAL_ACTIVE;
+	tty_port_set_active(&info->port, 1);
 	return 0;
 }
 
@@ -4100,7 +4095,7 @@ static void show_serial_version(void)
 	       &serial_version[11]); /* "$Revision: x.yy" */
 }
 
-/* rs_init inits the driver at boot (using the module_init chain) */
+/* rs_init inits the driver at boot (using the initcall chain) */
 
 static const struct tty_operations rs_ops = {
 	.open = rs_open,
@@ -4249,5 +4244,4 @@ static int __init rs_init(void)
 }
 
 /* this makes sure that rs_init is called during kernel boot */
-
-module_init(rs_init);
+device_initcall(rs_init);

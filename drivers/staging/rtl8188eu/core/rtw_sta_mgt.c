@@ -11,11 +11,6 @@
  * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
- *
  ******************************************************************************/
 #define _RTW_STA_MGT_C_
 
@@ -315,7 +310,6 @@ u32	rtw_free_stainfo(struct adapter *padapter, struct sta_info *psta)
 	/* for A-MPDU Rx reordering buffer control, cancel reordering_ctrl_timer */
 	for (i = 0; i < 16; i++) {
 		struct list_head *phead, *plist;
-		struct recv_frame *prhdr;
 		struct recv_frame *prframe;
 		struct __queue *ppending_recvframe_queue;
 		struct __queue *pfree_recv_queue = &padapter->recvpriv.free_recv_queue;
@@ -332,8 +326,7 @@ u32	rtw_free_stainfo(struct adapter *padapter, struct sta_info *psta)
 		plist = phead->next;
 
 		while (!list_empty(phead)) {
-			prhdr = container_of(plist, struct recv_frame, list);
-			prframe = (struct recv_frame *)prhdr;
+			prframe = container_of(plist, struct recv_frame, list);
 
 			plist = plist->next;
 

@@ -172,6 +172,7 @@ struct i40iw_hw;
 u8 __iomem *i40iw_get_hw_addr(void *dev);
 void i40iw_ieq_mpa_crc_ae(struct i40iw_sc_dev *dev, struct i40iw_sc_qp *qp);
 enum i40iw_status_code i40iw_vf_wait_vchnl_resp(struct i40iw_sc_dev *dev);
+bool i40iw_vf_clear_to_send(struct i40iw_sc_dev *dev);
 enum i40iw_status_code i40iw_ieq_check_mpacrc(struct shash_desc *desc, void *addr,
 					      u32 length, u32 value);
 struct i40iw_sc_qp *i40iw_ieq_get_qp(struct i40iw_sc_dev *dev, struct i40iw_puda_buf *buf);
@@ -197,6 +198,8 @@ enum i40iw_status_code i40iw_cqp_manage_vf_pble_bp(struct i40iw_sc_dev *dev,
 void i40iw_cqp_spawn_worker(struct i40iw_sc_dev *dev,
 			    struct i40iw_virtchnl_work_info *work_info, u32 iw_vf_idx);
 void *i40iw_remove_head(struct list_head *list);
+void i40iw_qp_suspend_resume(struct i40iw_sc_dev *dev, struct i40iw_sc_qp *qp, bool suspend);
+void i40iw_qp_mss_modify(struct i40iw_sc_dev *dev, struct i40iw_sc_qp *qp);
 
 void i40iw_term_modify_qp(struct i40iw_sc_qp *qp, u8 next_state, u8 term, u8 term_len);
 void i40iw_terminate_done(struct i40iw_sc_qp *qp, int timeout_occurred);
@@ -206,9 +209,9 @@ void i40iw_terminate_del_timer(struct i40iw_sc_qp *qp);
 enum i40iw_status_code i40iw_hw_manage_vf_pble_bp(struct i40iw_device *iwdev,
 						  struct i40iw_manage_vf_pble_info *info,
 						  bool wait);
-struct i40iw_dev_pestat;
-void i40iw_hw_stats_start_timer(struct i40iw_sc_dev *);
-void i40iw_hw_stats_del_timer(struct i40iw_sc_dev *);
+struct i40iw_sc_vsi;
+void i40iw_hw_stats_start_timer(struct i40iw_sc_vsi *vsi);
+void i40iw_hw_stats_stop_timer(struct i40iw_sc_vsi *vsi);
 #define i40iw_mmiowb() mmiowb()
 void i40iw_wr32(struct i40iw_hw *hw, u32 reg, u32 value);
 u32  i40iw_rd32(struct i40iw_hw *hw, u32 reg);

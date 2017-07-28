@@ -180,23 +180,16 @@ static int socrates_nand_probe(struct platform_device *ofdev)
 	nand_chip->dev_ready = socrates_nand_device_ready;
 
 	nand_chip->ecc.mode = NAND_ECC_SOFT;	/* enable ECC */
+	nand_chip->ecc.algo = NAND_ECC_HAMMING;
 
 	/* TODO: I have no idea what real delay is. */
 	nand_chip->chip_delay = 20;		/* 20us command delay time */
 
 	dev_set_drvdata(&ofdev->dev, host);
 
-	/* first scan to find the device and get the page size */
-	if (nand_scan_ident(mtd, 1, NULL)) {
-		res = -ENXIO;
+	res = nand_scan(mtd, 1);
+	if (res)
 		goto out;
-	}
-
-	/* second phase scan */
-	if (nand_scan_tail(mtd)) {
-		res = -ENXIO;
-		goto out;
-	}
 
 	res = mtd_device_register(mtd, NULL, 0);
 	if (!res)

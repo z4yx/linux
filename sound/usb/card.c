@@ -206,7 +206,6 @@ static int snd_usb_create_stream(struct snd_usb_audio *chip, int ctrlif, int int
 	if (! snd_usb_parse_audio_interface(chip, interface)) {
 		usb_set_interface(dev, interface, 0); /* reset the current interface */
 		usb_driver_claim_interface(&usb_audio_driver, iface, (void *)-1L);
-		return -EINVAL;
 	}
 
 	return 0;
@@ -315,7 +314,8 @@ static int snd_usb_audio_free(struct snd_usb_audio *chip)
 		snd_usb_endpoint_free(ep);
 
 	mutex_destroy(&chip->mutex);
-	dev_set_drvdata(&chip->dev->dev, NULL);
+	if (!atomic_read(&chip->shutdown))
+		dev_set_drvdata(&chip->dev->dev, NULL);
 	kfree(chip);
 	return 0;
 }
@@ -350,6 +350,7 @@ static int snd_usb_audio_create(struct usb_interface *intf,
 	case USB_SPEED_HIGH:
 	case USB_SPEED_WIRELESS:
 	case USB_SPEED_SUPER:
+	case USB_SPEED_SUPER_PLUS:
 		break;
 	default:
 		dev_err(&dev->dev, "unknown device speed %d\n", snd_usb_get_speed(dev));
@@ -449,6 +450,9 @@ static int snd_usb_audio_create(struct usb_interface *intf,
 		break;
 	case USB_SPEED_SUPER:
 		strlcat(card->longname, ", super speed", sizeof(card->longname));
+		break;
+	case USB_SPEED_SUPER_PLUS:
+		strlcat(card->longname, ", super speed plus", sizeof(card->longname));
 		break;
 	default:
 		break;
@@ -552,7 +556,6 @@ static int usb_audio_probe(struct usb_interface *intf,
 				goto __error;
 			}
 			chip = usb_chip[i];
-			dev_set_drvdata(&dev->dev, chip);
 			atomic_inc(&chip->active); /* avoid autopm */
 			break;
 		}
@@ -578,6 +581,7 @@ static int usb_audio_probe(struct usb_interface *intf,
 			goto __error;
 		}
 	}
+	dev_set_drvdata(&dev->dev, chip);
 
 	/*
 	 * For devices with more than one control interface, we assume the

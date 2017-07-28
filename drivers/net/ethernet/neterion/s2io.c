@@ -4021,7 +4021,6 @@ static netdev_tx_t s2io_xmit(struct sk_buff *skb, struct net_device *dev)
 	unsigned long flags = 0;
 	u16 vlan_tag = 0;
 	struct fifo_info *fifo = NULL;
-	int do_spin_lock = 1;
 	int offload_type;
 	int enable_per_list_interrupt = 0;
 	struct config_param *config = &sp->config;
@@ -4074,7 +4073,6 @@ static netdev_tx_t s2io_xmit(struct sk_buff *skb, struct net_device *dev)
 					queue += sp->udp_fifo_idx;
 					if (skb->len > 1024)
 						enable_per_list_interrupt = 1;
-					do_spin_lock = 0;
 				}
 			}
 		}
@@ -4084,12 +4082,7 @@ static netdev_tx_t s2io_xmit(struct sk_buff *skb, struct net_device *dev)
 			[skb->priority & (MAX_TX_FIFOS - 1)];
 	fifo = &mac_control->fifos[queue];
 
-	if (do_spin_lock)
-		spin_lock_irqsave(&fifo->tx_lock, flags);
-	else {
-		if (unlikely(!spin_trylock_irqsave(&fifo->tx_lock, flags)))
-			return NETDEV_TX_LOCKED;
-	}
+	spin_lock_irqsave(&fifo->tx_lock, flags);
 
 	if (sp->config.multiq) {
 		if (__netif_subqueue_stopped(dev, fifo->fifo_no)) {
@@ -6685,11 +6678,6 @@ static int s2io_change_mtu(struct net_device *dev, int new_mtu)
 	struct s2io_nic *sp = netdev_priv(dev);
 	int ret = 0;
 
-	if ((new_mtu < MIN_MTU) || (new_mtu > S2IO_JUMBO_SIZE)) {
-		DBG_PRINT(ERR_DBG, "%s: MTU size is invalid.\n", dev->name);
-		return -EPERM;
-	}
-
 	dev->mtu = new_mtu;
 	if (netif_running(dev)) {
 		s2io_stop_all_tx_queue(sp);
@@ -7419,7 +7407,7 @@ static int rx_osm_handler(struct ring_info *ring_data, struct RxD_t * rxdp)
 
 	if ((rxdp->Control_1 & TCP_OR_UDP_FRAME) &&
 	    ((!ring_data->lro) ||
-	     (ring_data->lro && (!(rxdp->Control_1 & RXD_FRAME_IP_FRAG)))) &&
+	     (!(rxdp->Control_1 & RXD_FRAME_IP_FRAG))) &&
 	    (dev->features & NETIF_F_RXCSUM)) {
 		l3_csum = RXD_GET_L3_CKSUM(rxdp->Control_1);
 		l4_csum = RXD_GET_L4_CKSUM(rxdp->Control_1);
@@ -8025,6 +8013,10 @@ s2io_init_nic(struct pci_dev *pdev, const struct pci_device_id *pre)
 		config->max_mac_addr = S2IO_HERC_MAX_MAC_ADDRESSES;
 		config->mc_start_offset = S2IO_HERC_MC_ADDR_START_OFFSET;
 	}
+
+	/* MTU range: 46 - 9600 */
+	dev->min_mtu = MIN_MTU;
+	dev->max_mtu = S2IO_JUMBO_SIZE;
 
 	/* store mac addresses from CAM to s2io_nic structure */
 	do_s2io_store_unicast_mc(sp);

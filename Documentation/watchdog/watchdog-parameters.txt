@@ -4,7 +4,7 @@ be listed here unless the driver has its own driver-specific information
 file.
 
 
-See Documentation/kernel-parameters.txt for information on
+See Documentation/admin-guide/kernel-parameters.rst for information on
 providing kernel parameters for builtin drivers versus loadable
 modules.
 
@@ -85,6 +85,10 @@ nowayout: Watchdog cannot be stopped once started
 -------------------------------------------------
 davinci_wdt:
 heartbeat: Watchdog heartbeat period in seconds from 1 to 600, default 60
+-------------------------------------------------
+ebc-c384_wdt:
+timeout: Watchdog timeout in seconds. (1<=timeout<=15300, default=60)
+nowayout: Watchdog cannot be stopped once started
 -------------------------------------------------
 ep93xx_wdt:
 nowayout: Watchdog cannot be stopped once started

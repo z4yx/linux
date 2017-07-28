@@ -62,7 +62,7 @@ u32 i40iw_initialize_hw_resources(struct i40iw_device *iwdev)
 	max_mr = iwdev->sc_dev.hmc_info->hmc_obj[I40IW_HMC_IW_MR].cnt;
 	arp_table_size = iwdev->sc_dev.hmc_info->hmc_obj[I40IW_HMC_IW_ARP].cnt;
 	iwdev->max_cqe = 0xFFFFF;
-	num_pds = max_qp * 4;
+	num_pds = I40IW_MAX_PDS;
 	resources_size = sizeof(struct i40iw_arp_entry) * arp_table_size;
 	resources_size += sizeof(unsigned long) * BITS_TO_LONGS(max_qp);
 	resources_size += sizeof(unsigned long) * BITS_TO_LONGS(max_mr);
@@ -106,7 +106,9 @@ u32 i40iw_initialize_hw_resources(struct i40iw_device *iwdev)
 	set_bit(2, iwdev->allocated_pds);
 
 	spin_lock_init(&iwdev->resource_lock);
-	mrdrvbits = 24 - get_count_order(iwdev->max_mr);
+	spin_lock_init(&iwdev->qptable_lock);
+	/* stag index mask has a minimum of 14 bits */
+	mrdrvbits = 24 - max(get_count_order(iwdev->max_mr), 14);
 	iwdev->mr_stagmask = ~(((1 << mrdrvbits) - 1) << (32 - mrdrvbits));
 	return 0;
 }
@@ -263,6 +265,7 @@ void i40iw_next_iw_state(struct i40iw_qp *iwqp,
 		info.dont_send_fin = false;
 	if (iwqp->sc_qp.term_flags && (state == I40IW_QP_STATE_ERROR))
 		info.reset_tcp_conn = true;
+	iwqp->hw_iwarp_state = state;
 	i40iw_hw_modify_qp(iwqp->iwdev, iwqp, &info, 0);
 }
 
@@ -301,11 +304,17 @@ void i40iw_process_aeq(struct i40iw_device *iwdev)
 			    "%s ae_id = 0x%x bool qp=%d qp_id = %d\n",
 			    __func__, info->ae_id, info->qp, info->qp_cq_id);
 		if (info->qp) {
+			spin_lock_irqsave(&iwdev->qptable_lock, flags);
 			iwqp = iwdev->qp_table[info->qp_cq_id];
 			if (!iwqp) {
-				i40iw_pr_err("qp_id %d is already freed\n", info->qp_cq_id);
+				spin_unlock_irqrestore(&iwdev->qptable_lock, flags);
+				i40iw_debug(dev, I40IW_DEBUG_AEQ,
+					    "%s qp_id %d is already freed\n",
+					    __func__, info->qp_cq_id);
 				continue;
 			}
+			i40iw_add_ref(&iwqp->ibqp);
+			spin_unlock_irqrestore(&iwdev->qptable_lock, flags);
 			qp = &iwqp->sc_qp;
 			spin_lock_irqsave(&iwqp->lock, flags);
 			iwqp->hw_tcp_state = info->tcp_state;
@@ -352,6 +361,9 @@ void i40iw_process_aeq(struct i40iw_device *iwdev)
 				continue;
 			i40iw_cm_disconn(iwqp);
 			break;
+		case I40IW_AE_QP_SUSPEND_COMPLETE:
+			i40iw_qp_suspend_resume(dev, &iwqp->sc_qp, false);
+			break;
 		case I40IW_AE_TERMINATE_SENT:
 			i40iw_terminate_send_fin(qp);
 			break;
@@ -397,20 +409,21 @@ void i40iw_process_aeq(struct i40iw_device *iwdev)
 		case I40IW_AE_LCE_CQ_CATASTROPHIC:
 		case I40IW_AE_UDA_XMIT_DGRAM_TOO_LONG:
 		case I40IW_AE_UDA_XMIT_IPADDR_MISMATCH:
-		case I40IW_AE_QP_SUSPEND_COMPLETE:
 			ctx_info->err_rq_idx_valid = false;
 		default:
-				if (!info->sq && ctx_info->err_rq_idx_valid) {
-					ctx_info->err_rq_idx = info->wqe_idx;
-					ctx_info->tcp_info_valid = false;
-					ctx_info->iwarp_info_valid = false;
-					ret = dev->iw_priv_qp_ops->qp_setctx(&iwqp->sc_qp,
-									     iwqp->host_ctx.va,
-									     ctx_info);
-				}
-				i40iw_terminate_connection(qp, info);
-				break;
+			if (!info->sq && ctx_info->err_rq_idx_valid) {
+				ctx_info->err_rq_idx = info->wqe_idx;
+				ctx_info->tcp_info_valid = false;
+				ctx_info->iwarp_info_valid = false;
+				ret = dev->iw_priv_qp_ops->qp_setctx(&iwqp->sc_qp,
+								     iwqp->host_ctx.va,
+								     ctx_info);
+			}
+			i40iw_terminate_connection(qp, info);
+			break;
 		}
+		if (info->qp)
+			i40iw_rem_ref(&iwqp->ibqp);
 	} while (1);
 
 	if (aeqcnt)
@@ -460,7 +473,7 @@ int i40iw_manage_apbvt(struct i40iw_device *iwdev, u16 accel_local_port, bool ad
  */
 void i40iw_manage_arp_cache(struct i40iw_device *iwdev,
 			    unsigned char *mac_addr,
-			    __be32 *ip_addr,
+			    u32 *ip_addr,
 			    bool ipv4,
 			    u32 action)
 {
@@ -481,7 +494,7 @@ void i40iw_manage_arp_cache(struct i40iw_device *iwdev,
 		cqp_info->cqp_cmd = OP_ADD_ARP_CACHE_ENTRY;
 		info = &cqp_info->in.u.add_arp_cache_entry.info;
 		memset(info, 0, sizeof(*info));
-		info->arp_index = cpu_to_le32(arp_index);
+		info->arp_index = cpu_to_le16((u16)arp_index);
 		info->permanent = true;
 		ether_addr_copy(info->mac_addr, mac_addr);
 		cqp_info->in.u.add_arp_cache_entry.scratch = (uintptr_t)cqp_request;
@@ -529,6 +542,7 @@ enum i40iw_status_code i40iw_manage_qhash(struct i40iw_device *iwdev,
 {
 	struct i40iw_qhash_table_info *info;
 	struct i40iw_sc_dev *dev = &iwdev->sc_dev;
+	struct i40iw_sc_vsi *vsi = &iwdev->vsi;
 	enum i40iw_status_code status;
 	struct i40iw_cqp *iwcqp = &iwdev->cqp;
 	struct i40iw_cqp_request *cqp_request;
@@ -541,6 +555,7 @@ enum i40iw_status_code i40iw_manage_qhash(struct i40iw_device *iwdev,
 	info = &cqp_info->in.u.manage_qhash_table_entry.info;
 	memset(info, 0, sizeof(*info));
 
+	info->vsi = &iwdev->vsi;
 	info->manage = mtype;
 	info->entry_type = etype;
 	if (cminfo->vlan_id != 0xFFFF) {
@@ -551,8 +566,9 @@ enum i40iw_status_code i40iw_manage_qhash(struct i40iw_device *iwdev,
 	}
 
 	info->ipv4_valid = cminfo->ipv4;
+	info->user_pri = cminfo->user_pri;
 	ether_addr_copy(info->mac_addr, iwdev->netdev->dev_addr);
-	info->qp_num = cpu_to_le32(dev->ilq->qp_id);
+	info->qp_num = cpu_to_le32(vsi->ilq->qp_id);
 	info->dest_port = cpu_to_le16(cminfo->loc_port);
 	info->dest_ip[0] = cpu_to_le32(cminfo->loc_addr[0]);
 	info->dest_ip[1] = cpu_to_le32(cminfo->loc_addr[1]);
@@ -608,6 +624,7 @@ enum i40iw_status_code i40iw_hw_flush_wqes(struct i40iw_device *iwdev,
 	struct i40iw_qp_flush_info *hw_info;
 	struct i40iw_cqp_request *cqp_request;
 	struct cqp_commands_info *cqp_info;
+	struct i40iw_qp *iwqp = (struct i40iw_qp *)qp->back_qp;
 
 	cqp_request = i40iw_get_cqp_request(&iwdev->cqp, wait);
 	if (!cqp_request)
@@ -622,9 +639,30 @@ enum i40iw_status_code i40iw_hw_flush_wqes(struct i40iw_device *iwdev,
 	cqp_info->in.u.qp_flush_wqes.qp = qp;
 	cqp_info->in.u.qp_flush_wqes.scratch = (uintptr_t)cqp_request;
 	status = i40iw_handle_cqp_op(iwdev, cqp_request);
-	if (status)
+	if (status) {
 		i40iw_pr_err("CQP-OP Flush WQE's fail");
-	return status;
+		complete(&iwqp->sq_drained);
+		complete(&iwqp->rq_drained);
+		return status;
+	}
+	if (!cqp_request->compl_info.maj_err_code) {
+		switch (cqp_request->compl_info.min_err_code) {
+		case I40IW_CQP_COMPL_RQ_WQE_FLUSHED:
+			complete(&iwqp->sq_drained);
+			break;
+		case I40IW_CQP_COMPL_SQ_WQE_FLUSHED:
+			complete(&iwqp->rq_drained);
+			break;
+		case I40IW_CQP_COMPL_RQ_SQ_WQE_FLUSHED:
+			break;
+		default:
+			complete(&iwqp->sq_drained);
+			complete(&iwqp->rq_drained);
+			break;
+		}
+	}
+
+	return 0;
 }
 
 /**

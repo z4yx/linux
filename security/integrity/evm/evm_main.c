@@ -78,11 +78,11 @@ static int evm_find_protected_xattrs(struct dentry *dentry)
 	int error;
 	int count = 0;
 
-	if (!inode->i_op->getxattr)
+	if (!(inode->i_opflags & IOP_XATTR))
 		return -EOPNOTSUPP;
 
 	for (xattr = evm_config_xattrnames; *xattr != NULL; xattr++) {
-		error = inode->i_op->getxattr(dentry, *xattr, NULL, 0);
+		error = __vfs_getxattr(dentry, inode, *xattr, NULL, 0);
 		if (error < 0) {
 			if (error == -ENODATA)
 				continue;
@@ -145,6 +145,10 @@ static enum integrity_status evm_verify_hmac(struct dentry *dentry,
 	/* check value type */
 	switch (xattr_data->type) {
 	case EVM_XATTR_HMAC:
+		if (xattr_len != sizeof(struct evm_ima_xattr_data)) {
+			evm_status = INTEGRITY_FAIL;
+			goto out;
+		}
 		rc = evm_calc_hmac(dentry, xattr_name, xattr_value,
 				   xattr_value_len, calc.digest);
 		if (rc)
@@ -299,8 +303,8 @@ static int evm_protect_xattr(struct dentry *dentry, const char *xattr_name,
 			return 0;
 
 		/* exception for pseudo filesystems */
-		if (dentry->d_inode->i_sb->s_magic == TMPFS_MAGIC
-		    || dentry->d_inode->i_sb->s_magic == SYSFS_MAGIC)
+		if (dentry->d_sb->s_magic == TMPFS_MAGIC
+		    || dentry->d_sb->s_magic == SYSFS_MAGIC)
 			return 0;
 
 		integrity_audit_msg(AUDIT_INTEGRITY_METADATA,

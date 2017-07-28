@@ -15,11 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
+ * http://www.gnu.org/licenses/gpl-2.0.html
  *
  * GPL HEADER END
  */
@@ -75,13 +71,18 @@ struct osc_async_page {
 	struct client_obd       *oap_cli;
 	struct osc_object       *oap_obj;
 
-	struct ldlm_lock	*oap_ldlm_lock;
 	spinlock_t		 oap_lock;
 };
 
 #define oap_page	oap_brw_page.pg
 #define oap_count       oap_brw_page.count
 #define oap_brw_flags   oap_brw_page.flag
+
+static inline struct osc_async_page *brw_page2oap(struct brw_page *pga)
+{
+	return (struct osc_async_page *)container_of(pga, struct osc_async_page,
+						     oap_brw_page);
+}
 
 struct osc_cache_waiter {
 	struct list_head	      ocw_entry;
@@ -102,37 +103,39 @@ void osc_update_next_shrink(struct client_obd *cli);
 
 extern struct ptlrpc_request_set *PTLRPCD_SET;
 
+typedef int (*osc_enqueue_upcall_f)(void *cookie, struct lustre_handle *lockh,
+				    int rc);
+
 int osc_enqueue_base(struct obd_export *exp, struct ldlm_res_id *res_id,
-		     __u64 *flags, ldlm_policy_data_t *policy,
+		     __u64 *flags, union ldlm_policy_data *policy,
 		     struct ost_lvb *lvb, int kms_valid,
-		     obd_enqueue_update_f upcall,
+		     osc_enqueue_upcall_f upcall,
 		     void *cookie, struct ldlm_enqueue_info *einfo,
-		     struct lustre_handle *lockh,
 		     struct ptlrpc_request_set *rqset, int async, int agl);
-int osc_cancel_base(struct lustre_handle *lockh, __u32 mode);
 
 int osc_match_base(struct obd_export *exp, struct ldlm_res_id *res_id,
-		   __u32 type, ldlm_policy_data_t *policy, __u32 mode,
+		   __u32 type, union ldlm_policy_data *policy, __u32 mode,
 		   __u64 *flags, void *data, struct lustre_handle *lockh,
 		   int unref);
 
-int osc_setattr_async_base(struct obd_export *exp, struct obd_info *oinfo,
-			   struct obd_trans_info *oti,
-			   obd_enqueue_update_f upcall, void *cookie,
-			   struct ptlrpc_request_set *rqset);
-int osc_punch_base(struct obd_export *exp, struct obd_info *oinfo,
+int osc_setattr_async(struct obd_export *exp, struct obdo *oa,
+		      obd_enqueue_update_f upcall, void *cookie,
+		      struct ptlrpc_request_set *rqset);
+int osc_punch_base(struct obd_export *exp, struct obdo *oa,
 		   obd_enqueue_update_f upcall, void *cookie,
 		   struct ptlrpc_request_set *rqset);
-int osc_sync_base(struct obd_export *exp, struct obd_info *oinfo,
+int osc_sync_base(struct osc_object *exp, struct obdo *oa,
 		  obd_enqueue_update_f upcall, void *cookie,
 		  struct ptlrpc_request_set *rqset);
 
 int osc_process_config_base(struct obd_device *obd, struct lustre_cfg *cfg);
 int osc_build_rpc(const struct lu_env *env, struct client_obd *cli,
 		  struct list_head *ext_list, int cmd);
-int osc_lru_shrink(struct client_obd *cli, int target);
+long osc_lru_shrink(const struct lu_env *env, struct client_obd *cli,
+		    long target, bool force);
+long osc_lru_reclaim(struct client_obd *cli, unsigned long npages);
 
-extern spinlock_t osc_ast_guard;
+unsigned long osc_ldlm_weigh_ast(struct ldlm_lock *dlmlock);
 
 int osc_setup(struct obd_device *obd, struct lustre_cfg *lcfg);
 
@@ -150,6 +153,11 @@ static inline int osc_recoverable_error(int rc)
 static inline unsigned long rpcs_in_flight(struct client_obd *cli)
 {
 	return cli->cl_r_in_flight + cli->cl_w_in_flight;
+}
+
+static inline char *cli_name(struct client_obd *cli)
+{
+	return cli->cl_import->imp_obd->obd_name;
 }
 
 struct osc_device {
@@ -173,8 +181,6 @@ static inline struct osc_device *obd2osc_dev(const struct obd_device *d)
 	return container_of0(d->obd_lu_dev, struct osc_device, od_cl.cd_lu_dev);
 }
 
-int osc_dlm_lock_pageref(struct ldlm_lock *dlm);
-
 extern struct kmem_cache *osc_quota_kmem;
 struct osc_quota_info {
 	/** linkage for quota hash table */
@@ -189,8 +195,27 @@ int osc_quota_setdq(struct client_obd *cli, const unsigned int qid[],
 int osc_quota_chkdq(struct client_obd *cli, const unsigned int qid[]);
 int osc_quotactl(struct obd_device *unused, struct obd_export *exp,
 		 struct obd_quotactl *oqctl);
-int osc_quotacheck(struct obd_device *unused, struct obd_export *exp,
-		   struct obd_quotactl *oqctl);
-int osc_quota_poll_check(struct obd_export *exp, struct if_quotacheck *qchk);
+void osc_inc_unstable_pages(struct ptlrpc_request *req);
+void osc_dec_unstable_pages(struct ptlrpc_request *req);
+bool osc_over_unstable_soft_limit(struct client_obd *cli);
+
+/**
+ * Bit flags for osc_dlm_lock_at_pageoff().
+ */
+enum osc_dap_flags {
+	/**
+	 * Just check if the desired lock exists, it won't hold reference
+	 * count on lock.
+	 */
+	OSC_DAP_FL_TEST_LOCK	= BIT(0),
+	/**
+	 * Return the lock even if it is being canceled.
+	 */
+	OSC_DAP_FL_CANCELING	= BIT(1),
+};
+
+struct ldlm_lock *osc_dlmlock_at_pgoff(const struct lu_env *env,
+				       struct osc_object *obj, pgoff_t index,
+				       enum osc_dap_flags flags);
 
 #endif /* OSC_INTERNAL_H */

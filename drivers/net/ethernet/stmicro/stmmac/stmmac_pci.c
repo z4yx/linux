@@ -81,6 +81,7 @@ static void stmmac_default_data(struct plat_stmmacenet_data *plat)
 	plat->mdio_bus_data->phy_mask = 0;
 
 	plat->dma_cfg->pbl = 32;
+	plat->dma_cfg->pblx8 = true;
 	/* TODO: AXI */
 
 	/* Set default value for multicast hash bins */
@@ -88,6 +89,9 @@ static void stmmac_default_data(struct plat_stmmacenet_data *plat)
 
 	/* Set default value for unicast filter entries */
 	plat->unicast_filter_entries = 1;
+
+	/* Set the maxmtu to a default of JUMBO_LEN */
+	plat->maxmtu = JUMBO_LEN;
 }
 
 static int quark_default_data(struct plat_stmmacenet_data *plat,
@@ -115,6 +119,7 @@ static int quark_default_data(struct plat_stmmacenet_data *plat,
 	plat->mdio_bus_data->phy_mask = 0;
 
 	plat->dma_cfg->pbl = 16;
+	plat->dma_cfg->pblx8 = true;
 	plat->dma_cfg->fixed_burst = 1;
 	/* AXI (TODO) */
 
@@ -123,6 +128,9 @@ static int quark_default_data(struct plat_stmmacenet_data *plat,
 
 	/* Set default value for unicast filter entries */
 	plat->unicast_filter_entries = 1;
+
+	/* Set the maxmtu to a default of JUMBO_LEN */
+	plat->maxmtu = JUMBO_LEN;
 
 	return 0;
 }
@@ -231,30 +239,10 @@ static int stmmac_pci_probe(struct pci_dev *pdev,
  */
 static void stmmac_pci_remove(struct pci_dev *pdev)
 {
-	struct net_device *ndev = pci_get_drvdata(pdev);
-
-	stmmac_dvr_remove(ndev);
+	stmmac_dvr_remove(&pdev->dev);
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int stmmac_pci_suspend(struct device *dev)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct net_device *ndev = pci_get_drvdata(pdev);
-
-	return stmmac_suspend(ndev);
-}
-
-static int stmmac_pci_resume(struct device *dev)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct net_device *ndev = pci_get_drvdata(pdev);
-
-	return stmmac_resume(ndev);
-}
-#endif
-
-static SIMPLE_DEV_PM_OPS(stmmac_pm_ops, stmmac_pci_suspend, stmmac_pci_resume);
+static SIMPLE_DEV_PM_OPS(stmmac_pm_ops, stmmac_suspend, stmmac_resume);
 
 #define STMMAC_VENDOR_ID 0x700
 #define STMMAC_QUARK_ID  0x0937

@@ -26,7 +26,7 @@
 #include <linux/fs.h>
 #include <linux/slab.h>
 #include <linux/rcupdate.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/io.h>
 #include <asm/processor.h>
@@ -103,9 +103,9 @@ void show_regs(struct pt_regs *regs)
 /*
  * free current thread data structures etc..
  */
-void exit_thread(void)
+void exit_thread(struct task_struct *tsk)
 {
-	exit_fpu();
+	exit_fpu(tsk);
 }
 
 void flush_thread(void)

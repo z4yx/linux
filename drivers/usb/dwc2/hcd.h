@@ -348,7 +348,7 @@ struct dwc2_qh {
 	struct list_head qtd_list;
 	struct dwc2_host_chan *channel;
 	struct list_head qh_list_entry;
-	struct dwc2_hcd_dma_desc *desc_list;
+	struct dwc2_dma_desc *desc_list;
 	dma_addr_t desc_list_dma;
 	u32 desc_list_sz;
 	u32 *n_bytes;
@@ -552,6 +552,7 @@ static inline void dwc2_hcd_qtd_unlink_and_free(struct dwc2_hsotg *hsotg,
 {
 	list_del(&qtd->qtd_list_entry);
 	kfree(qtd);
+	qtd = NULL;
 }
 
 /* Descriptor DMA support functions */
@@ -792,11 +793,6 @@ extern void dwc2_hcd_dump_frrem(struct dwc2_hsotg *hsotg);
 #define URB_SEND_ZERO_PACKET	0x2
 
 /* Host driver callbacks */
-
-extern void dwc2_host_start(struct dwc2_hsotg *hsotg);
-extern void dwc2_host_disconnect(struct dwc2_hsotg *hsotg);
-extern void dwc2_host_hub_info(struct dwc2_hsotg *hsotg, void *context,
-			       int *hub_addr, int *hub_port);
 extern struct dwc2_tt *dwc2_host_get_tt_info(struct dwc2_hsotg *hsotg,
 					     void *context, gfp_t mem_flags,
 					     int *ttport);

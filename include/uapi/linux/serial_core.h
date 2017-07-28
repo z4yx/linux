@@ -264,7 +264,13 @@
 /* MVEBU UART */
 #define PORT_MVEBU	114
 
+/* Microchip PIC32 UART */
+#define PORT_PIC32	115
+
+/* MPS2 UART */
+#define PORT_MPS2UART	116
+
 /* NaiveMIPS */
-#define PORT_NAIVEMIPS	115
+#define PORT_NAIVEMIPS	117
 
 #endif /* _UAPILINUX_SERIAL_CORE_H */

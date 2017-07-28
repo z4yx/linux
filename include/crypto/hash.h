@@ -547,8 +547,7 @@ static inline void ahash_request_set_tfm(struct ahash_request *req,
  * the allocation, the provided ahash handle
  * is registered in the request data structure.
  *
- * Return: allocated request handle in case of success; IS_ERR() is true in case
- *	   of an error, PTR_ERR() returns the error code.
+ * Return: allocated request handle in case of success, or NULL if out of memory
  */
 static inline struct ahash_request *ahash_request_alloc(
 	struct crypto_ahash *tfm, gfp_t gfp)
@@ -606,7 +605,7 @@ static inline struct ahash_request *ahash_request_cast(
  * the cipher operation completes.
  *
  * The callback function is registered with the &ahash_request handle and
- * must comply with the following template
+ * must comply with the following template::
  *
  *	void callback_function(struct crypto_async_request *req, int error)
  */

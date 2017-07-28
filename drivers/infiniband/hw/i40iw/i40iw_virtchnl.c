@@ -254,7 +254,7 @@ static void vchnl_pf_send_get_hmc_fcn_resp(struct i40iw_sc_dev *dev,
 static void vchnl_pf_send_get_pe_stats_resp(struct i40iw_sc_dev *dev,
 					    u32 vf_id,
 					    struct i40iw_virtchnl_op_buf *vchnl_msg,
-					    struct i40iw_dev_hw_stats hw_stats)
+					    struct i40iw_dev_hw_stats *hw_stats)
 {
 	enum i40iw_status_code ret_code;
 	u8 resp_buffer[sizeof(struct i40iw_virtchnl_resp_buf) + sizeof(struct i40iw_dev_hw_stats) - 1];
@@ -264,7 +264,7 @@ static void vchnl_pf_send_get_pe_stats_resp(struct i40iw_sc_dev *dev,
 	vchnl_msg_resp->iw_chnl_op_ctx = vchnl_msg->iw_chnl_op_ctx;
 	vchnl_msg_resp->iw_chnl_buf_len = sizeof(resp_buffer);
 	vchnl_msg_resp->iw_op_ret_code = I40IW_SUCCESS;
-	*((struct i40iw_dev_hw_stats *)vchnl_msg_resp->iw_chnl_buf) = hw_stats;
+	*((struct i40iw_dev_hw_stats *)vchnl_msg_resp->iw_chnl_buf) = *hw_stats;
 	ret_code = dev->vchnl_if.vchnl_send(dev, vf_id, resp_buffer, sizeof(resp_buffer));
 	if (ret_code)
 		i40iw_debug(dev, I40IW_DEBUG_VIRT,
@@ -403,6 +403,19 @@ del_out:
 }
 
 /**
+ * i40iw_vf_init_pestat - Initialize stats for VF
+ * @devL pointer to the VF Device
+ * @stats: Statistics structure pointer
+ * @index: Stats index
+ */
+static void i40iw_vf_init_pestat(struct i40iw_sc_dev *dev, struct i40iw_vsi_pestat *stats, u16 index)
+{
+	stats->hw = dev->hw;
+	i40iw_hw_stats_init(stats, (u8)index, false);
+	spin_lock_init(&stats->lock);
+}
+
+/**
  * i40iw_vchnl_recv_pf - Receive PF virtual channel messages
  * @dev: IWARP device pointer
  * @vf_id: Virtual function ID associated with the message
@@ -421,9 +434,8 @@ enum i40iw_status_code i40iw_vchnl_recv_pf(struct i40iw_sc_dev *dev,
 	u16 first_avail_iw_vf = I40IW_MAX_PE_ENABLED_VF_COUNT;
 	struct i40iw_virt_mem vf_dev_mem;
 	struct i40iw_virtchnl_work_info work_info;
-	struct i40iw_dev_pestat *devstat;
+	struct i40iw_vsi_pestat *stats;
 	enum i40iw_status_code ret_code;
-	unsigned long flags;
 
 	if (!dev || !msg || !len)
 		return I40IW_ERR_PARAM;
@@ -437,11 +449,9 @@ enum i40iw_status_code i40iw_vchnl_recv_pf(struct i40iw_sc_dev *dev,
 			vchnl_pf_send_get_ver_resp(dev, vf_id, vchnl_msg);
 		return I40IW_SUCCESS;
 	}
-	for (iw_vf_idx = 0; iw_vf_idx < I40IW_MAX_PE_ENABLED_VF_COUNT;
-	     iw_vf_idx++) {
+	for (iw_vf_idx = 0; iw_vf_idx < I40IW_MAX_PE_ENABLED_VF_COUNT; iw_vf_idx++) {
 		if (!dev->vf_dev[iw_vf_idx]) {
-			if (first_avail_iw_vf ==
-			    I40IW_MAX_PE_ENABLED_VF_COUNT)
+			if (first_avail_iw_vf == I40IW_MAX_PE_ENABLED_VF_COUNT)
 				first_avail_iw_vf = iw_vf_idx;
 			continue;
 		}
@@ -498,14 +508,7 @@ enum i40iw_status_code i40iw_vchnl_recv_pf(struct i40iw_sc_dev *dev,
 				i40iw_debug(dev, I40IW_DEBUG_VIRT,
 					    "VF%u error CQP HMC Function operation.\n",
 					    vf_id);
-			ret_code = i40iw_device_init_pestat(&vf_dev->dev_pestat);
-			if (ret_code)
-				i40iw_debug(dev, I40IW_DEBUG_VIRT,
-					    "VF%u - i40iw_device_init_pestat failed\n",
-					    vf_id);
-			vf_dev->dev_pestat.ops.iw_hw_stat_init(&vf_dev->dev_pestat,
-							      (u8)vf_dev->pmf_index,
-							      dev->hw, false);
+			i40iw_vf_init_pestat(dev, &vf_dev->pestat, vf_dev->pmf_index);
 			vf_dev->stats_initialized = true;
 		} else {
 			if (vf_dev) {
@@ -536,12 +539,10 @@ enum i40iw_status_code i40iw_vchnl_recv_pf(struct i40iw_sc_dev *dev,
 	case I40IW_VCHNL_OP_GET_STATS:
 		if (!vf_dev)
 			return I40IW_ERR_BAD_PTR;
-		devstat = &vf_dev->dev_pestat;
-		spin_lock_irqsave(&dev->dev_pestat.stats_lock, flags);
-		devstat->ops.iw_hw_stat_read_all(devstat, &devstat->hw_stats);
-		spin_unlock_irqrestore(&dev->dev_pestat.stats_lock, flags);
+		stats = &vf_dev->pestat;
+		i40iw_hw_stats_read_all(stats, &stats->hw_stats);
 		vf_dev->msg_count--;
-		vchnl_pf_send_get_pe_stats_resp(dev, vf_id, vchnl_msg, devstat->hw_stats);
+		vchnl_pf_send_get_pe_stats_resp(dev, vf_id, vchnl_msg, &stats->hw_stats);
 		break;
 	default:
 		i40iw_debug(dev, I40IW_DEBUG_VIRT,
@@ -596,23 +597,25 @@ enum i40iw_status_code i40iw_vchnl_vf_get_ver(struct i40iw_sc_dev *dev,
 	struct i40iw_virtchnl_req vchnl_req;
 	enum i40iw_status_code ret_code;
 
+	if (!i40iw_vf_clear_to_send(dev))
+		return I40IW_ERR_TIMEOUT;
 	memset(&vchnl_req, 0, sizeof(vchnl_req));
 	vchnl_req.dev = dev;
 	vchnl_req.parm = vchnl_ver;
 	vchnl_req.parm_len = sizeof(*vchnl_ver);
 	vchnl_req.vchnl_msg = &dev->vchnl_vf_msg_buf.vchnl_msg;
+
 	ret_code = vchnl_vf_send_get_ver_req(dev, &vchnl_req);
-	if (!ret_code) {
-		ret_code = i40iw_vf_wait_vchnl_resp(dev);
-		if (!ret_code)
-			ret_code = vchnl_req.ret_code;
-		else
-			dev->vchnl_up = false;
-	} else {
+	if (ret_code) {
 		i40iw_debug(dev, I40IW_DEBUG_VIRT,
 			    "%s Send message failed 0x%0x\n", __func__, ret_code);
+		return ret_code;
 	}
-	return ret_code;
+	ret_code = i40iw_vf_wait_vchnl_resp(dev);
+	if (ret_code)
+		return ret_code;
+	else
+		return vchnl_req.ret_code;
 }
 
 /**
@@ -626,23 +629,25 @@ enum i40iw_status_code i40iw_vchnl_vf_get_hmc_fcn(struct i40iw_sc_dev *dev,
 	struct i40iw_virtchnl_req vchnl_req;
 	enum i40iw_status_code ret_code;
 
+	if (!i40iw_vf_clear_to_send(dev))
+		return I40IW_ERR_TIMEOUT;
 	memset(&vchnl_req, 0, sizeof(vchnl_req));
 	vchnl_req.dev = dev;
 	vchnl_req.parm = hmc_fcn;
 	vchnl_req.parm_len = sizeof(*hmc_fcn);
 	vchnl_req.vchnl_msg = &dev->vchnl_vf_msg_buf.vchnl_msg;
+
 	ret_code = vchnl_vf_send_get_hmc_fcn_req(dev, &vchnl_req);
-	if (!ret_code) {
-		ret_code = i40iw_vf_wait_vchnl_resp(dev);
-		if (!ret_code)
-			ret_code = vchnl_req.ret_code;
-		else
-			dev->vchnl_up = false;
-	} else {
+	if (ret_code) {
 		i40iw_debug(dev, I40IW_DEBUG_VIRT,
 			    "%s Send message failed 0x%0x\n", __func__, ret_code);
+		return ret_code;
 	}
-	return ret_code;
+	ret_code = i40iw_vf_wait_vchnl_resp(dev);
+	if (ret_code)
+		return ret_code;
+	else
+		return vchnl_req.ret_code;
 }
 
 /**
@@ -660,25 +665,27 @@ enum i40iw_status_code i40iw_vchnl_vf_add_hmc_objs(struct i40iw_sc_dev *dev,
 	struct i40iw_virtchnl_req vchnl_req;
 	enum i40iw_status_code ret_code;
 
+	if (!i40iw_vf_clear_to_send(dev))
+		return I40IW_ERR_TIMEOUT;
 	memset(&vchnl_req, 0, sizeof(vchnl_req));
 	vchnl_req.dev = dev;
 	vchnl_req.vchnl_msg = &dev->vchnl_vf_msg_buf.vchnl_msg;
+
 	ret_code = vchnl_vf_send_add_hmc_objs_req(dev,
 						  &vchnl_req,
 						  rsrc_type,
 						  start_index,
 						  rsrc_count);
-	if (!ret_code) {
-		ret_code = i40iw_vf_wait_vchnl_resp(dev);
-		if (!ret_code)
-			ret_code = vchnl_req.ret_code;
-		else
-			dev->vchnl_up = false;
-	} else {
+	if (ret_code) {
 		i40iw_debug(dev, I40IW_DEBUG_VIRT,
 			    "%s Send message failed 0x%0x\n", __func__, ret_code);
+		return ret_code;
 	}
-	return ret_code;
+	ret_code = i40iw_vf_wait_vchnl_resp(dev);
+	if (ret_code)
+		return ret_code;
+	else
+		return vchnl_req.ret_code;
 }
 
 /**
@@ -696,25 +703,27 @@ enum i40iw_status_code i40iw_vchnl_vf_del_hmc_obj(struct i40iw_sc_dev *dev,
 	struct i40iw_virtchnl_req vchnl_req;
 	enum i40iw_status_code ret_code;
 
+	if (!i40iw_vf_clear_to_send(dev))
+		return I40IW_ERR_TIMEOUT;
 	memset(&vchnl_req, 0, sizeof(vchnl_req));
 	vchnl_req.dev = dev;
 	vchnl_req.vchnl_msg = &dev->vchnl_vf_msg_buf.vchnl_msg;
+
 	ret_code = vchnl_vf_send_del_hmc_objs_req(dev,
 						  &vchnl_req,
 						  rsrc_type,
 						  start_index,
 						  rsrc_count);
-	if (!ret_code) {
-		ret_code = i40iw_vf_wait_vchnl_resp(dev);
-		if (!ret_code)
-			ret_code = vchnl_req.ret_code;
-		else
-			dev->vchnl_up = false;
-	} else {
+	if (ret_code) {
 		i40iw_debug(dev, I40IW_DEBUG_VIRT,
 			    "%s Send message failed 0x%0x\n", __func__, ret_code);
+		return ret_code;
 	}
-	return ret_code;
+	ret_code = i40iw_vf_wait_vchnl_resp(dev);
+	if (ret_code)
+		return ret_code;
+	else
+		return vchnl_req.ret_code;
 }
 
 /**
@@ -728,21 +737,23 @@ enum i40iw_status_code i40iw_vchnl_vf_get_pe_stats(struct i40iw_sc_dev *dev,
 	struct i40iw_virtchnl_req  vchnl_req;
 	enum i40iw_status_code ret_code;
 
+	if (!i40iw_vf_clear_to_send(dev))
+		return I40IW_ERR_TIMEOUT;
 	memset(&vchnl_req, 0, sizeof(vchnl_req));
 	vchnl_req.dev = dev;
 	vchnl_req.parm = hw_stats;
 	vchnl_req.parm_len = sizeof(*hw_stats);
 	vchnl_req.vchnl_msg = &dev->vchnl_vf_msg_buf.vchnl_msg;
+
 	ret_code = vchnl_vf_send_get_pe_stats_req(dev, &vchnl_req);
-	if (!ret_code) {
-		ret_code = i40iw_vf_wait_vchnl_resp(dev);
-		if (!ret_code)
-			ret_code = vchnl_req.ret_code;
-		else
-			dev->vchnl_up = false;
-	} else {
+	if (ret_code) {
 		i40iw_debug(dev, I40IW_DEBUG_VIRT,
 			    "%s Send message failed 0x%0x\n", __func__, ret_code);
+		return ret_code;
 	}
-	return ret_code;
+	ret_code = i40iw_vf_wait_vchnl_resp(dev);
+	if (ret_code)
+		return ret_code;
+	else
+		return vchnl_req.ret_code;
 }

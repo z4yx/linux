@@ -93,27 +93,27 @@ static int   ftdi_8u2232c_probe(struct usb_serial *serial);
 static void  ftdi_USB_UIRT_setup(struct ftdi_private *priv);
 static void  ftdi_HE_TIRA1_setup(struct ftdi_private *priv);
 
-static struct ftdi_sio_quirk ftdi_jtag_quirk = {
+static const struct ftdi_sio_quirk ftdi_jtag_quirk = {
 	.probe	= ftdi_jtag_probe,
 };
 
-static struct ftdi_sio_quirk ftdi_NDI_device_quirk = {
+static const struct ftdi_sio_quirk ftdi_NDI_device_quirk = {
 	.probe	= ftdi_NDI_device_setup,
 };
 
-static struct ftdi_sio_quirk ftdi_USB_UIRT_quirk = {
+static const struct ftdi_sio_quirk ftdi_USB_UIRT_quirk = {
 	.port_probe = ftdi_USB_UIRT_setup,
 };
 
-static struct ftdi_sio_quirk ftdi_HE_TIRA1_quirk = {
+static const struct ftdi_sio_quirk ftdi_HE_TIRA1_quirk = {
 	.port_probe = ftdi_HE_TIRA1_setup,
 };
 
-static struct ftdi_sio_quirk ftdi_stmclite_quirk = {
+static const struct ftdi_sio_quirk ftdi_stmclite_quirk = {
 	.probe	= ftdi_stmclite_probe,
 };
 
-static struct ftdi_sio_quirk ftdi_8u2232c_quirk = {
+static const struct ftdi_sio_quirk ftdi_8u2232c_quirk = {
 	.probe	= ftdi_8u2232c_probe,
 };
 
@@ -648,6 +648,8 @@ static const struct usb_device_id id_table_combined[] = {
 	{ USB_DEVICE(FTDI_VID, FTDI_ELV_TFD128_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_ELV_FM3RX_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_ELV_WS777_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_PALMSENS_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_IVIUM_XSTAT_PID) },
 	{ USB_DEVICE(FTDI_VID, LINX_SDMUSBQSS_PID) },
 	{ USB_DEVICE(FTDI_VID, LINX_MASTERDEVEL2_PID) },
 	{ USB_DEVICE(FTDI_VID, LINX_FUTURE_0_PID) },
@@ -984,7 +986,8 @@ static const struct usb_device_id id_table_combined[] = {
 	/* ekey Devices */
 	{ USB_DEVICE(FTDI_VID, FTDI_EKEY_CONV_USB_PID) },
 	/* Infineon Devices */
-	{ USB_DEVICE_INTERFACE_NUMBER(INFINEON_VID, INFINEON_TRIBOARD_PID, 1) },
+	{ USB_DEVICE_INTERFACE_NUMBER(INFINEON_VID, INFINEON_TRIBOARD_TC1798_PID, 1) },
+	{ USB_DEVICE_INTERFACE_NUMBER(INFINEON_VID, INFINEON_TRIBOARD_TC2X7_PID, 1) },
 	/* GE Healthcare devices */
 	{ USB_DEVICE(GE_HEALTHCARE_VID, GE_HEALTHCARE_NEMO_TRACKER_PID) },
 	/* Active Research (Actisense) devices */
@@ -1008,6 +1011,9 @@ static const struct usb_device_id id_table_combined[] = {
 	{ USB_DEVICE(ICPDAS_VID, ICPDAS_I7560U_PID) },
 	{ USB_DEVICE(ICPDAS_VID, ICPDAS_I7561U_PID) },
 	{ USB_DEVICE(ICPDAS_VID, ICPDAS_I7563U_PID) },
+	{ USB_DEVICE(WICED_VID, WICED_USB20706V2_PID) },
+	{ USB_DEVICE(TI_VID, TI_CC3200_LAUNCHPAD_PID),
+		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },
 	{ }					/* Terminating entry */
 };
 
@@ -1449,8 +1455,6 @@ static int get_serial_info(struct usb_serial_port *port,
 	struct ftdi_private *priv = usb_get_serial_port_data(port);
 	struct serial_struct tmp;
 
-	if (!retinfo)
-		return -EFAULT;
 	memset(&tmp, 0, sizeof(tmp));
 	tmp.flags = priv->flags;
 	tmp.baud_base = priv->baud_base;
@@ -1531,9 +1535,6 @@ static int get_lsr_info(struct usb_serial_port *port,
 {
 	struct ftdi_private *priv = usb_get_serial_port_data(port);
 	unsigned int result = 0;
-
-	if (!retinfo)
-		return -EFAULT;
 
 	if (priv->transmit_empty)
 		result = TIOCSER_TEMT;
@@ -1775,7 +1776,7 @@ static void remove_sysfs_attrs(struct usb_serial_port *port)
 static int ftdi_sio_probe(struct usb_serial *serial,
 					const struct usb_device_id *id)
 {
-	struct ftdi_sio_quirk *quirk =
+	const struct ftdi_sio_quirk *quirk =
 				(struct ftdi_sio_quirk *)id->driver_info;
 
 	if (quirk && quirk->probe) {
@@ -1792,7 +1793,7 @@ static int ftdi_sio_probe(struct usb_serial *serial,
 static int ftdi_sio_port_probe(struct usb_serial_port *port)
 {
 	struct ftdi_private *priv;
-	struct ftdi_sio_quirk *quirk = usb_get_serial_data(port->serial);
+	const struct ftdi_sio_quirk *quirk = usb_get_serial_data(port->serial);
 
 
 	priv = kzalloc(sizeof(struct ftdi_private), GFP_KERNEL);

@@ -67,6 +67,38 @@ int snd_fw_transaction(struct fw_unit *unit, int tcode,
 }
 EXPORT_SYMBOL(snd_fw_transaction);
 
+#define PROBE_DELAY_MS		(2 * MSEC_PER_SEC)
+
+/**
+ * snd_fw_schedule_registration - schedule work for sound card registration
+ * @unit: an instance for unit on IEEE 1394 bus
+ * @dwork: delayed work with callback function
+ *
+ * This function is not designed for general purposes. When new unit is
+ * connected to IEEE 1394 bus, the bus is under bus-reset state because of
+ * topological change. In this state, units tend to fail both of asynchronous
+ * and isochronous communication. To avoid this problem, this function is used
+ * to postpone sound card registration after the state. The callers must
+ * set up instance of delayed work in advance.
+ */
+void snd_fw_schedule_registration(struct fw_unit *unit,
+				  struct delayed_work *dwork)
+{
+	u64 now, delay;
+
+	now = get_jiffies_64();
+	delay = fw_parent_device(unit)->card->reset_jiffies
+					+ msecs_to_jiffies(PROBE_DELAY_MS);
+
+	if (time_after64(delay, now))
+		delay -= now;
+	else
+		delay = 0;
+
+	mod_delayed_work(system_wq, dwork, delay);
+}
+EXPORT_SYMBOL(snd_fw_schedule_registration);
+
 static void async_midi_port_callback(struct fw_card *card, int rcode,
 				     void *data, size_t length,
 				     void *callback_data)
@@ -82,7 +114,7 @@ static void async_midi_port_callback(struct fw_card *card, int rcode,
 		snd_rawmidi_transmit_ack(substream, port->consume_bytes);
 	else if (!rcode_is_permanent_error(rcode))
 		/* To start next transaction immediately for recovery. */
-		port->next_ktime = ktime_set(0, 0);
+		port->next_ktime = 0;
 	else
 		/* Don't continue processing. */
 		port->error = true;
@@ -124,7 +156,7 @@ static void midi_port_work(struct work_struct *work)
 	if (port->consume_bytes <= 0) {
 		/* Do it in next chance, immediately. */
 		if (port->consume_bytes == 0) {
-			port->next_ktime = ktime_set(0, 0);
+			port->next_ktime = 0;
 			schedule_work(&port->work);
 		} else {
 			/* Fatal error. */
@@ -187,7 +219,7 @@ int snd_fw_async_midi_port_init(struct snd_fw_async_midi_port *port,
 	port->addr = addr;
 	port->fill = fill;
 	port->idling = true;
-	port->next_ktime = ktime_set(0, 0);
+	port->next_ktime = 0;
 	port->error = false;
 
 	INIT_WORK(&port->work, midi_port_work);

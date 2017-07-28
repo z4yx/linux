@@ -72,13 +72,13 @@
 #include <sys/ioctl.h>
 #include <inttypes.h>
 #include <linux/kernel.h>
-#include <linux/magic.h>
 #include <linux/types.h>
 #include <sys/ttydefaults.h>
 #include <api/fs/tracing_path.h>
 #include <termios.h>
 #include <linux/bitops.h>
 #include <termios.h>
+#include "strlist.h"
 
 extern const char *graph_line;
 extern const char *graph_dotted_line;
@@ -159,12 +159,6 @@ static inline char *gitstrchrnul(const char *s, int c)
 }
 #endif
 
-/*
- * Wrappers:
- */
-void *xrealloc(void *ptr, size_t size) __attribute__((weak));
-
-
 static inline void *zalloc(size_t size)
 {
 	return calloc(1, size);
@@ -184,12 +178,6 @@ static inline void *zalloc(size_t size)
 #undef isupper
 #undef tolower
 #undef toupper
-
-#ifndef NSEC_PER_MSEC
-#define NSEC_PER_MSEC	1000000L
-#endif
-
-int parse_nsec_time(const char *str, u64 *ptime);
 
 extern unsigned char sane_ctype[256];
 #define GIT_SPACE		0x01
@@ -222,6 +210,8 @@ static inline int sane_case(int x, int high)
 
 int mkdir_p(char *path, mode_t mode);
 int rm_rf(char *path);
+struct strlist *lsdir(const char *name, bool (*filter)(const char *, struct dirent *));
+bool lsdir_no_dot_filter(const char *name, struct dirent *d);
 int copyfile(const char *from, const char *to);
 int copyfile_mode(const char *from, const char *to, mode_t mode);
 int copyfile_offset(int fromfd, loff_t from_ofs, int tofd, loff_t to_ofs, u64 size);
@@ -230,6 +220,7 @@ s64 perf_atoll(const char *str);
 char **argv_split(const char *str, int *argcp);
 void argv_free(char **argv);
 bool strglobmatch(const char *str, const char *pat);
+bool strglobmatch_nocase(const char *str, const char *pat);
 bool strlazymatch(const char *str, const char *pat);
 static inline bool strisglob(const char *str)
 {
@@ -254,11 +245,18 @@ int hex2u64(const char *ptr, u64 *val);
 char *ltrim(char *s);
 char *rtrim(char *s);
 
+static inline char *trim(char *s)
+{
+	return ltrim(rtrim(s));
+}
+
 void dump_stack(void);
 void sighandler_dump_stack(int sig);
 
 extern unsigned int page_size;
 extern int cacheline_size;
+extern int sysctl_perf_event_max_stack;
+extern int sysctl_perf_event_max_contexts_per_stack;
 
 struct parse_tag {
 	char tag;
@@ -356,4 +354,13 @@ typedef void (*print_binary_t)(enum binary_printer_ops,
 void print_binary(unsigned char *data, size_t len,
 		  size_t bytes_per_line, print_binary_t printer,
 		  void *extra);
+
+#if !defined(__GLIBC__) && !defined(__ANDROID__)
+extern int sched_getcpu(void);
+#endif
+
+int is_printable_array(char *p, unsigned int len);
+
+int timestamp__scnprintf_usec(u64 timestamp, char *buf, size_t sz);
+
 #endif /* GIT_COMPAT_UTIL_H */

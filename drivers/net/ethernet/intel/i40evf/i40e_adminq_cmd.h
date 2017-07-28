@@ -78,17 +78,17 @@ struct i40e_aq_desc {
 #define I40E_AQ_FLAG_EI_SHIFT	14
 #define I40E_AQ_FLAG_FE_SHIFT	15
 
-#define I40E_AQ_FLAG_DD		(1 << I40E_AQ_FLAG_DD_SHIFT)  /* 0x1    */
-#define I40E_AQ_FLAG_CMP	(1 << I40E_AQ_FLAG_CMP_SHIFT) /* 0x2    */
-#define I40E_AQ_FLAG_ERR	(1 << I40E_AQ_FLAG_ERR_SHIFT) /* 0x4    */
-#define I40E_AQ_FLAG_VFE	(1 << I40E_AQ_FLAG_VFE_SHIFT) /* 0x8    */
-#define I40E_AQ_FLAG_LB		(1 << I40E_AQ_FLAG_LB_SHIFT)  /* 0x200  */
-#define I40E_AQ_FLAG_RD		(1 << I40E_AQ_FLAG_RD_SHIFT)  /* 0x400  */
-#define I40E_AQ_FLAG_VFC	(1 << I40E_AQ_FLAG_VFC_SHIFT) /* 0x800  */
-#define I40E_AQ_FLAG_BUF	(1 << I40E_AQ_FLAG_BUF_SHIFT) /* 0x1000 */
-#define I40E_AQ_FLAG_SI		(1 << I40E_AQ_FLAG_SI_SHIFT)  /* 0x2000 */
-#define I40E_AQ_FLAG_EI		(1 << I40E_AQ_FLAG_EI_SHIFT)  /* 0x4000 */
-#define I40E_AQ_FLAG_FE		(1 << I40E_AQ_FLAG_FE_SHIFT)  /* 0x8000 */
+#define I40E_AQ_FLAG_DD		BIT(I40E_AQ_FLAG_DD_SHIFT)  /* 0x1    */
+#define I40E_AQ_FLAG_CMP	BIT(I40E_AQ_FLAG_CMP_SHIFT) /* 0x2    */
+#define I40E_AQ_FLAG_ERR	BIT(I40E_AQ_FLAG_ERR_SHIFT) /* 0x4    */
+#define I40E_AQ_FLAG_VFE	BIT(I40E_AQ_FLAG_VFE_SHIFT) /* 0x8    */
+#define I40E_AQ_FLAG_LB		BIT(I40E_AQ_FLAG_LB_SHIFT)  /* 0x200  */
+#define I40E_AQ_FLAG_RD		BIT(I40E_AQ_FLAG_RD_SHIFT)  /* 0x400  */
+#define I40E_AQ_FLAG_VFC	BIT(I40E_AQ_FLAG_VFC_SHIFT) /* 0x800  */
+#define I40E_AQ_FLAG_BUF	BIT(I40E_AQ_FLAG_BUF_SHIFT) /* 0x1000 */
+#define I40E_AQ_FLAG_SI		BIT(I40E_AQ_FLAG_SI_SHIFT)  /* 0x2000 */
+#define I40E_AQ_FLAG_EI		BIT(I40E_AQ_FLAG_EI_SHIFT)  /* 0x4000 */
+#define I40E_AQ_FLAG_FE		BIT(I40E_AQ_FLAG_FE_SHIFT)  /* 0x8000 */
 
 /* error codes */
 enum i40e_admin_queue_err {
@@ -204,7 +204,6 @@ enum i40e_admin_queue_opc {
 	i40e_aqc_opc_suspend_port_tx				= 0x041B,
 	i40e_aqc_opc_resume_port_tx				= 0x041C,
 	i40e_aqc_opc_configure_partition_bw			= 0x041D,
-
 	/* hmc */
 	i40e_aqc_opc_query_hmc_resource_profile	= 0x0500,
 	i40e_aqc_opc_set_hmc_resource_profile	= 0x0501,
@@ -426,6 +425,7 @@ struct i40e_aqc_list_capabilities_element_resp {
 #define I40E_AQ_CAP_ID_SDP		0x0062
 #define I40E_AQ_CAP_ID_MDIO		0x0063
 #define I40E_AQ_CAP_ID_WSR_PROT		0x0064
+#define I40E_AQ_CAP_ID_NVM_MGMT		0x0080
 #define I40E_AQ_CAP_ID_FLEX10		0x00F1
 #define I40E_AQ_CAP_ID_CEM		0x00F2
 
@@ -450,13 +450,15 @@ I40E_CHECK_CMD_LENGTH(i40e_aqc_cppm_configuration);
 /* Set ARP Proxy command / response (indirect 0x0104) */
 struct i40e_aqc_arp_proxy_data {
 	__le16	command_flags;
-#define I40E_AQ_ARP_INIT_IPV4	0x0008
-#define I40E_AQ_ARP_UNSUP_CTL	0x0010
-#define I40E_AQ_ARP_ENA		0x0020
-#define I40E_AQ_ARP_ADD_IPV4	0x0040
-#define I40E_AQ_ARP_DEL_IPV4	0x0080
+#define I40E_AQ_ARP_INIT_IPV4	0x0800
+#define I40E_AQ_ARP_UNSUP_CTL	0x1000
+#define I40E_AQ_ARP_ENA		0x2000
+#define I40E_AQ_ARP_ADD_IPV4	0x4000
+#define I40E_AQ_ARP_DEL_IPV4	0x8000
 	__le16	table_id;
-	__le32	pfpm_proxyfc;
+	__le32	enabled_offloads;
+#define I40E_AQ_ARP_DIRECTED_OFFLOAD_ENABLE	0x00000020
+#define I40E_AQ_ARP_OFFLOAD_ENABLE		0x00000800
 	__le32	ip_addr;
 	u8	mac_addr[6];
 	u8	reserved[2];
@@ -471,17 +473,19 @@ struct i40e_aqc_ns_proxy_data {
 	__le16	table_idx_ipv6_0;
 	__le16	table_idx_ipv6_1;
 	__le16	control;
-#define I40E_AQ_NS_PROXY_ADD_0		0x0100
-#define I40E_AQ_NS_PROXY_DEL_0		0x0200
-#define I40E_AQ_NS_PROXY_ADD_1		0x0400
-#define I40E_AQ_NS_PROXY_DEL_1		0x0800
-#define I40E_AQ_NS_PROXY_ADD_IPV6_0	0x1000
-#define I40E_AQ_NS_PROXY_DEL_IPV6_0	0x2000
-#define I40E_AQ_NS_PROXY_ADD_IPV6_1	0x4000
-#define I40E_AQ_NS_PROXY_DEL_IPV6_1	0x8000
-#define I40E_AQ_NS_PROXY_COMMAND_SEQ	0x0001
-#define I40E_AQ_NS_PROXY_INIT_IPV6_TBL	0x0002
-#define I40E_AQ_NS_PROXY_INIT_MAC_TBL	0x0004
+#define I40E_AQ_NS_PROXY_ADD_0		0x0001
+#define I40E_AQ_NS_PROXY_DEL_0		0x0002
+#define I40E_AQ_NS_PROXY_ADD_1		0x0004
+#define I40E_AQ_NS_PROXY_DEL_1		0x0008
+#define I40E_AQ_NS_PROXY_ADD_IPV6_0	0x0010
+#define I40E_AQ_NS_PROXY_DEL_IPV6_0	0x0020
+#define I40E_AQ_NS_PROXY_ADD_IPV6_1	0x0040
+#define I40E_AQ_NS_PROXY_DEL_IPV6_1	0x0080
+#define I40E_AQ_NS_PROXY_COMMAND_SEQ	0x0100
+#define I40E_AQ_NS_PROXY_INIT_IPV6_TBL	0x0200
+#define I40E_AQ_NS_PROXY_INIT_MAC_TBL	0x0400
+#define I40E_AQ_NS_PROXY_OFFLOAD_ENABLE	0x0800
+#define I40E_AQ_NS_PROXY_DIRECTED_OFFLOAD_ENABLE	0x1000
 	u8	mac_addr_0[6];
 	u8	mac_addr_1[6];
 	u8	local_mac_addr[6];
@@ -1594,14 +1598,11 @@ struct i40e_aq_get_set_hmc_resource_profile {
 I40E_CHECK_CMD_LENGTH(i40e_aq_get_set_hmc_resource_profile);
 
 enum i40e_aq_hmc_profile {
-	/* I40E_HMC_PROFILE_NO_CHANGE    = 0, reserved */
+	/* I40E_HMC_PROFILE_NO_CHANGE	= 0, reserved */
 	I40E_HMC_PROFILE_DEFAULT	= 1,
 	I40E_HMC_PROFILE_FAVOR_VF	= 2,
 	I40E_HMC_PROFILE_EQUAL		= 3,
 };
-
-#define I40E_AQ_GET_HMC_RESOURCE_PROFILE_PM_MASK	0xF
-#define I40E_AQ_GET_HMC_RESOURCE_PROFILE_COUNT_MASK	0x3F
 
 /* Get PHY Abilities (indirect 0x0600) uses the generic indirect struct */
 
@@ -1638,6 +1639,10 @@ enum i40e_aq_phy_type {
 	I40E_PHY_TYPE_1000BASE_LX		= 0x1C,
 	I40E_PHY_TYPE_1000BASE_T_OPTICAL	= 0x1D,
 	I40E_PHY_TYPE_20GBASE_KR2		= 0x1E,
+	I40E_PHY_TYPE_25GBASE_KR		= 0x1F,
+	I40E_PHY_TYPE_25GBASE_CR		= 0x20,
+	I40E_PHY_TYPE_25GBASE_SR		= 0x21,
+	I40E_PHY_TYPE_25GBASE_LR		= 0x22,
 	I40E_PHY_TYPE_MAX
 };
 
@@ -1646,14 +1651,16 @@ enum i40e_aq_phy_type {
 #define I40E_LINK_SPEED_10GB_SHIFT	0x3
 #define I40E_LINK_SPEED_40GB_SHIFT	0x4
 #define I40E_LINK_SPEED_20GB_SHIFT	0x5
+#define I40E_LINK_SPEED_25GB_SHIFT	0x6
 
 enum i40e_aq_link_speed {
 	I40E_LINK_SPEED_UNKNOWN	= 0,
-	I40E_LINK_SPEED_100MB	= (1 << I40E_LINK_SPEED_100MB_SHIFT),
-	I40E_LINK_SPEED_1GB	= (1 << I40E_LINK_SPEED_1000MB_SHIFT),
-	I40E_LINK_SPEED_10GB	= (1 << I40E_LINK_SPEED_10GB_SHIFT),
-	I40E_LINK_SPEED_40GB	= (1 << I40E_LINK_SPEED_40GB_SHIFT),
-	I40E_LINK_SPEED_20GB	= (1 << I40E_LINK_SPEED_20GB_SHIFT)
+	I40E_LINK_SPEED_100MB	= BIT(I40E_LINK_SPEED_100MB_SHIFT),
+	I40E_LINK_SPEED_1GB	= BIT(I40E_LINK_SPEED_1000MB_SHIFT),
+	I40E_LINK_SPEED_10GB	= BIT(I40E_LINK_SPEED_10GB_SHIFT),
+	I40E_LINK_SPEED_40GB	= BIT(I40E_LINK_SPEED_40GB_SHIFT),
+	I40E_LINK_SPEED_20GB	= BIT(I40E_LINK_SPEED_20GB_SHIFT),
+	I40E_LINK_SPEED_25GB	= BIT(I40E_LINK_SPEED_25GB_SHIFT),
 };
 
 struct i40e_aqc_module_desc {
@@ -1676,6 +1683,8 @@ struct i40e_aq_get_phy_abilities_resp {
 #define I40E_AQ_PHY_LINK_ENABLED	0x08
 #define I40E_AQ_PHY_AN_ENABLED		0x10
 #define I40E_AQ_PHY_FLAG_MODULE_QUAL	0x20
+#define I40E_AQ_PHY_FEC_ABILITY_KR	0x40
+#define I40E_AQ_PHY_FEC_ABILITY_RS	0x80
 	__le16	eee_capability;
 #define I40E_AQ_EEE_100BASE_TX		0x0002
 #define I40E_AQ_EEE_1000BASE_T		0x0004
@@ -1686,7 +1695,22 @@ struct i40e_aq_get_phy_abilities_resp {
 	__le32	eeer_val;
 	u8	d3_lpan;
 #define I40E_AQ_SET_PHY_D3_LPAN_ENA	0x01
-	u8	reserved[3];
+	u8	phy_type_ext;
+#define I40E_AQ_PHY_TYPE_EXT_25G_KR	0X01
+#define I40E_AQ_PHY_TYPE_EXT_25G_CR	0X02
+#define I40E_AQ_PHY_TYPE_EXT_25G_SR	0x04
+#define I40E_AQ_PHY_TYPE_EXT_25G_LR	0x08
+	u8	fec_cfg_curr_mod_ext_info;
+#define I40E_AQ_ENABLE_FEC_KR		0x01
+#define I40E_AQ_ENABLE_FEC_RS		0x02
+#define I40E_AQ_REQUEST_FEC_KR		0x04
+#define I40E_AQ_REQUEST_FEC_RS		0x08
+#define I40E_AQ_ENABLE_FEC_AUTO		0x10
+#define I40E_AQ_FEC
+#define I40E_AQ_MODULE_TYPE_EXT_MASK	0xE0
+#define I40E_AQ_MODULE_TYPE_EXT_SHIFT	5
+
+	u8	ext_comp_code;
 	u8	phy_id[4];
 	u8	module_type[3];
 	u8	qualified_module_count;
@@ -1708,7 +1732,20 @@ struct i40e_aq_set_phy_config { /* same bits as above in all */
 	__le16	eee_capability;
 	__le32	eeer;
 	u8	low_power_ctrl;
-	u8	reserved[3];
+	u8	phy_type_ext;
+#define I40E_AQ_PHY_TYPE_EXT_25G_KR	0X01
+#define I40E_AQ_PHY_TYPE_EXT_25G_CR	0X02
+#define I40E_AQ_PHY_TYPE_EXT_25G_SR	0x04
+#define I40E_AQ_PHY_TYPE_EXT_25G_LR	0x08
+	u8	fec_config;
+#define I40E_AQ_SET_FEC_ABILITY_KR	BIT(0)
+#define I40E_AQ_SET_FEC_ABILITY_RS	BIT(1)
+#define I40E_AQ_SET_FEC_REQUEST_KR	BIT(2)
+#define I40E_AQ_SET_FEC_REQUEST_RS	BIT(3)
+#define I40E_AQ_SET_FEC_AUTO		BIT(4)
+#define I40E_AQ_PHY_FEC_CONFIG_SHIFT	0x0
+#define I40E_AQ_PHY_FEC_CONFIG_MASK	(0x1F << I40E_AQ_PHY_FEC_CONFIG_SHIFT)
+	u8	reserved;
 };
 
 I40E_CHECK_CMD_LENGTH(i40e_aq_set_phy_config);
@@ -1788,9 +1825,18 @@ struct i40e_aqc_get_link_status {
 #define I40E_AQ_LINK_TX_DRAINED		0x01
 #define I40E_AQ_LINK_TX_FLUSHED		0x03
 #define I40E_AQ_LINK_FORCED_40G		0x10
+/* 25G Error Codes */
+#define I40E_AQ_25G_NO_ERR		0X00
+#define I40E_AQ_25G_NOT_PRESENT		0X01
+#define I40E_AQ_25G_NVM_CRC_ERR		0X02
+#define I40E_AQ_25G_SBUS_UCODE_ERR	0X03
+#define I40E_AQ_25G_SERDES_UCODE_ERR	0X04
+#define I40E_AQ_25G_NIMB_UCODE_ERR	0X05
 	u8	loopback; /* use defines from i40e_aqc_set_lb_mode */
 	__le16	max_frame_size;
 	u8	config;
+#define I40E_AQ_CONFIG_FEC_KR_ENA	0x01
+#define I40E_AQ_CONFIG_FEC_RS_ENA	0x02
 #define I40E_AQ_CONFIG_CRC_ENA		0x04
 #define I40E_AQ_CONFIG_PACING_MASK	0x78
 	u8	external_power_ability;
@@ -1924,9 +1970,9 @@ I40E_CHECK_CMD_LENGTH(i40e_aqc_nvm_config_write);
 /* Used for 0x0704 as well as for 0x0705 commands */
 #define I40E_AQ_ANVM_FEATURE_OR_IMMEDIATE_SHIFT		1
 #define I40E_AQ_ANVM_FEATURE_OR_IMMEDIATE_MASK \
-				(1 << I40E_AQ_ANVM_FEATURE_OR_IMMEDIATE_SHIFT)
+				BIT(I40E_AQ_ANVM_FEATURE_OR_IMMEDIATE_SHIFT)
 #define I40E_AQ_ANVM_FEATURE		0
-#define I40E_AQ_ANVM_IMMEDIATE_FIELD	(1 << FEATURE_OR_IMMEDIATE_SHIFT)
+#define I40E_AQ_ANVM_IMMEDIATE_FIELD	BIT(FEATURE_OR_IMMEDIATE_SHIFT)
 struct i40e_aqc_nvm_config_data_feature {
 	__le16 feature_id;
 #define I40E_AQ_ANVM_FEATURE_OPTION_OEM_ONLY		0x01
@@ -2195,7 +2241,7 @@ struct i40e_aqc_del_udp_tunnel_completion {
 I40E_CHECK_CMD_LENGTH(i40e_aqc_del_udp_tunnel_completion);
 
 struct i40e_aqc_get_set_rss_key {
-#define I40E_AQC_SET_RSS_KEY_VSI_VALID		(0x1 << 15)
+#define I40E_AQC_SET_RSS_KEY_VSI_VALID		BIT(15)
 #define I40E_AQC_SET_RSS_KEY_VSI_ID_SHIFT	0
 #define I40E_AQC_SET_RSS_KEY_VSI_ID_MASK	(0x3FF << \
 					I40E_AQC_SET_RSS_KEY_VSI_ID_SHIFT)
@@ -2215,14 +2261,14 @@ struct i40e_aqc_get_set_rss_key_data {
 I40E_CHECK_STRUCT_LEN(0x34, i40e_aqc_get_set_rss_key_data);
 
 struct  i40e_aqc_get_set_rss_lut {
-#define I40E_AQC_SET_RSS_LUT_VSI_VALID		(0x1 << 15)
+#define I40E_AQC_SET_RSS_LUT_VSI_VALID		BIT(15)
 #define I40E_AQC_SET_RSS_LUT_VSI_ID_SHIFT	0
 #define I40E_AQC_SET_RSS_LUT_VSI_ID_MASK	(0x3FF << \
 					I40E_AQC_SET_RSS_LUT_VSI_ID_SHIFT)
 	__le16	vsi_id;
 #define I40E_AQC_SET_RSS_LUT_TABLE_TYPE_SHIFT	0
-#define I40E_AQC_SET_RSS_LUT_TABLE_TYPE_MASK	(0x1 << \
-					I40E_AQC_SET_RSS_LUT_TABLE_TYPE_SHIFT)
+#define I40E_AQC_SET_RSS_LUT_TABLE_TYPE_MASK \
+				BIT(I40E_AQC_SET_RSS_LUT_TABLE_TYPE_SHIFT)
 
 #define I40E_AQC_SET_RSS_LUT_TABLE_TYPE_VSI	0
 #define I40E_AQC_SET_RSS_LUT_TABLE_TYPE_PF	1

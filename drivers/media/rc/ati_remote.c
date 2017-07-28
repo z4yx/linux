@@ -527,8 +527,7 @@ static void ati_remote_input_report(struct urb *urb)
 	remote_num = (data[3] >> 4) & 0x0f;
 	if (channel_mask & (1 << (remote_num + 1))) {
 		dbginfo(&ati_remote->interface->dev,
-			"Masked input from channel 0x%02x: data %02x, "
-			"mask= 0x%02lx\n",
+			"Masked input from channel 0x%02x: data %02x, mask= 0x%02lx\n",
 			remote_num, data[2], channel_mask);
 		return;
 	}
@@ -873,13 +872,10 @@ static int ati_remote_probe(struct usb_interface *interface,
 	strlcat(ati_remote->rc_phys, "/input0", sizeof(ati_remote->rc_phys));
 	strlcat(ati_remote->mouse_phys, "/input1", sizeof(ati_remote->mouse_phys));
 
-	if (udev->manufacturer)
-		strlcpy(ati_remote->rc_name, udev->manufacturer,
-			sizeof(ati_remote->rc_name));
-
-	if (udev->product)
-		snprintf(ati_remote->rc_name, sizeof(ati_remote->rc_name),
-			 "%s %s", ati_remote->rc_name, udev->product);
+	snprintf(ati_remote->rc_name, sizeof(ati_remote->rc_name), "%s%s%s",
+		udev->manufacturer ?: "",
+		udev->manufacturer && udev->product ? " " : "",
+		udev->product ?: "");
 
 	if (!strlen(ati_remote->rc_name))
 		snprintf(ati_remote->rc_name, sizeof(ati_remote->rc_name),

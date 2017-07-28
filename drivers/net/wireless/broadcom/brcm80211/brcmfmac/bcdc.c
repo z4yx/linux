@@ -194,7 +194,7 @@ retry:
 	}
 
 	/* Check info buffer */
-	info = (void *)&msg[1];
+	info = (void *)&bcdc->buf[0];
 
 	/* Copy info buffer */
 	if (buf) {
@@ -321,8 +321,20 @@ brcmf_proto_bcdc_hdrpull(struct brcmf_pub *drvr, bool do_fws,
 	if (pktbuf->len == 0)
 		return -ENODATA;
 
-	*ifp = tmp_if;
+	if (ifp != NULL)
+		*ifp = tmp_if;
 	return 0;
+}
+
+static int brcmf_proto_bcdc_tx_queue_data(struct brcmf_pub *drvr, int ifidx,
+					  struct sk_buff *skb)
+{
+	struct brcmf_if *ifp = brcmf_get_ifp(drvr, ifidx);
+
+	if (!brcmf_fws_queue_skbs(drvr->fws))
+		return brcmf_proto_txdata(drvr, ifidx, 0, skb);
+
+	return brcmf_fws_process_skb(ifp, skb);
 }
 
 static int
@@ -351,6 +363,12 @@ brcmf_proto_bcdc_add_tdls_peer(struct brcmf_pub *drvr, int ifidx,
 {
 }
 
+static void brcmf_proto_bcdc_rxreorder(struct brcmf_if *ifp,
+				       struct sk_buff *skb)
+{
+	brcmf_fws_rxreorder(ifp, skb);
+}
+
 int brcmf_proto_bcdc_attach(struct brcmf_pub *drvr)
 {
 	struct brcmf_bcdc *bcdc;
@@ -368,10 +386,12 @@ int brcmf_proto_bcdc_attach(struct brcmf_pub *drvr)
 	drvr->proto->hdrpull = brcmf_proto_bcdc_hdrpull;
 	drvr->proto->query_dcmd = brcmf_proto_bcdc_query_dcmd;
 	drvr->proto->set_dcmd = brcmf_proto_bcdc_set_dcmd;
+	drvr->proto->tx_queue_data = brcmf_proto_bcdc_tx_queue_data;
 	drvr->proto->txdata = brcmf_proto_bcdc_txdata;
 	drvr->proto->configure_addr_mode = brcmf_proto_bcdc_configure_addr_mode;
 	drvr->proto->delete_peer = brcmf_proto_bcdc_delete_peer;
 	drvr->proto->add_tdls_peer = brcmf_proto_bcdc_add_tdls_peer;
+	drvr->proto->rxreorder = brcmf_proto_bcdc_rxreorder;
 	drvr->proto->pd = bcdc;
 
 	drvr->hdrlen += BCDC_HEADER_LEN + BRCMF_PROT_FW_SIGNAL_MAX_TXBYTES;

@@ -106,6 +106,8 @@ static struct pci_device_id ioat_pci_tbl[] = {
 	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_IOAT_BDX8) },
 	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_IOAT_BDX9) },
 
+	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_IOAT_SKX) },
+
 	/* I/OAT v3.3 platforms */
 	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_IOAT_BWD0) },
 	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_IOAT_BWD1) },
@@ -243,10 +245,15 @@ static bool is_bdx_ioat(struct pci_dev *pdev)
 	}
 }
 
+static inline bool is_skx_ioat(struct pci_dev *pdev)
+{
+	return (pdev->device == PCI_DEVICE_ID_INTEL_IOAT_SKX) ? true : false;
+}
+
 static bool is_xeon_cb32(struct pci_dev *pdev)
 {
 	return is_jf_ioat(pdev) || is_snb_ioat(pdev) || is_ivb_ioat(pdev) ||
-		is_hsw_ioat(pdev) || is_bdx_ioat(pdev);
+		is_hsw_ioat(pdev) || is_bdx_ioat(pdev) || is_skx_ioat(pdev);
 }
 
 bool is_bwd_ioat(struct pci_dev *pdev)
@@ -340,11 +347,13 @@ static int ioat_dma_self_test(struct ioatdma_device *ioat_dma)
 	dma_src = dma_map_single(dev, src, IOAT_TEST_SIZE, DMA_TO_DEVICE);
 	if (dma_mapping_error(dev, dma_src)) {
 		dev_err(dev, "mapping src buffer failed\n");
+		err = -ENOMEM;
 		goto free_resources;
 	}
 	dma_dest = dma_map_single(dev, dest, IOAT_TEST_SIZE, DMA_FROM_DEVICE);
 	if (dma_mapping_error(dev, dma_dest)) {
 		dev_err(dev, "mapping dest buffer failed\n");
+		err = -ENOMEM;
 		goto unmap_src;
 	}
 	flags = DMA_PREP_INTERRUPT;
@@ -690,19 +699,18 @@ static int ioat_alloc_chan_resources(struct dma_chan *c)
 	/* allocate a completion writeback area */
 	/* doing 2 32bit writes to mmio since 1 64b write doesn't work */
 	ioat_chan->completion =
-		dma_pool_alloc(ioat_chan->ioat_dma->completion_pool,
-			       GFP_KERNEL, &ioat_chan->completion_dma);
+		dma_pool_zalloc(ioat_chan->ioat_dma->completion_pool,
+				GFP_NOWAIT, &ioat_chan->completion_dma);
 	if (!ioat_chan->completion)
 		return -ENOMEM;
 
-	memset(ioat_chan->completion, 0, sizeof(*ioat_chan->completion));
 	writel(((u64)ioat_chan->completion_dma) & 0x00000000FFFFFFFF,
 	       ioat_chan->reg_base + IOAT_CHANCMP_OFFSET_LOW);
 	writel(((u64)ioat_chan->completion_dma) >> 32,
 	       ioat_chan->reg_base + IOAT_CHANCMP_OFFSET_HIGH);
 
 	order = IOAT_MAX_ORDER;
-	ring = ioat_alloc_ring(c, order, GFP_KERNEL);
+	ring = ioat_alloc_ring(c, order, GFP_NOWAIT);
 	if (!ring)
 		return -ENOMEM;
 
@@ -828,16 +836,20 @@ static int ioat_xor_val_self_test(struct ioatdma_device *ioat_dma)
 	op = IOAT_OP_XOR;
 
 	dest_dma = dma_map_page(dev, dest, 0, PAGE_SIZE, DMA_FROM_DEVICE);
-	if (dma_mapping_error(dev, dest_dma))
-		goto dma_unmap;
+	if (dma_mapping_error(dev, dest_dma)) {
+		err = -ENOMEM;
+		goto free_resources;
+	}
 
 	for (i = 0; i < IOAT_NUM_SRC_TEST; i++)
 		dma_srcs[i] = DMA_ERROR_CODE;
 	for (i = 0; i < IOAT_NUM_SRC_TEST; i++) {
 		dma_srcs[i] = dma_map_page(dev, xor_srcs[i], 0, PAGE_SIZE,
 					   DMA_TO_DEVICE);
-		if (dma_mapping_error(dev, dma_srcs[i]))
+		if (dma_mapping_error(dev, dma_srcs[i])) {
+			err = -ENOMEM;
 			goto dma_unmap;
+		}
 	}
 	tx = dma->device_prep_dma_xor(dma_chan, dest_dma, dma_srcs,
 				      IOAT_NUM_SRC_TEST, PAGE_SIZE,
@@ -905,8 +917,10 @@ static int ioat_xor_val_self_test(struct ioatdma_device *ioat_dma)
 	for (i = 0; i < IOAT_NUM_SRC_TEST + 1; i++) {
 		dma_srcs[i] = dma_map_page(dev, xor_val_srcs[i], 0, PAGE_SIZE,
 					   DMA_TO_DEVICE);
-		if (dma_mapping_error(dev, dma_srcs[i]))
+		if (dma_mapping_error(dev, dma_srcs[i])) {
+			err = -ENOMEM;
 			goto dma_unmap;
+		}
 	}
 	tx = dma->device_prep_dma_xor_val(dma_chan, dma_srcs,
 					  IOAT_NUM_SRC_TEST + 1, PAGE_SIZE,
@@ -958,8 +972,10 @@ static int ioat_xor_val_self_test(struct ioatdma_device *ioat_dma)
 	for (i = 0; i < IOAT_NUM_SRC_TEST + 1; i++) {
 		dma_srcs[i] = dma_map_page(dev, xor_val_srcs[i], 0, PAGE_SIZE,
 					   DMA_TO_DEVICE);
-		if (dma_mapping_error(dev, dma_srcs[i]))
+		if (dma_mapping_error(dev, dma_srcs[i])) {
+			err = -ENOMEM;
 			goto dma_unmap;
+		}
 	}
 	tx = dma->device_prep_dma_xor_val(dma_chan, dma_srcs,
 					  IOAT_NUM_SRC_TEST + 1, PAGE_SIZE,
@@ -1072,8 +1088,8 @@ static int ioat3_dma_probe(struct ioatdma_device *ioat_dma, int dca)
 	struct dma_device *dma;
 	struct dma_chan *c;
 	struct ioatdma_chan *ioat_chan;
-	bool is_raid_device = false;
 	int err;
+	u16 val16;
 
 	dma = &ioat_dma->dma_dev;
 	dma->device_prep_dma_memcpy = ioat_dma_prep_memcpy_lock;
@@ -1095,7 +1111,6 @@ static int ioat3_dma_probe(struct ioatdma_device *ioat_dma, int dca)
 		ioat_dma->cap &= ~(IOAT_CAP_XOR|IOAT_CAP_PQ);
 
 	if (ioat_dma->cap & IOAT_CAP_XOR) {
-		is_raid_device = true;
 		dma->max_xor = 8;
 
 		dma_cap_set(DMA_XOR, dma->cap_mask);
@@ -1106,7 +1121,6 @@ static int ioat3_dma_probe(struct ioatdma_device *ioat_dma, int dca)
 	}
 
 	if (ioat_dma->cap & IOAT_CAP_PQ) {
-		is_raid_device = true;
 
 		dma->device_prep_dma_pq = ioat_prep_pq;
 		dma->device_prep_dma_pq_val = ioat_prep_pq_val;
@@ -1173,6 +1187,17 @@ static int ioat3_dma_probe(struct ioatdma_device *ioat_dma, int dca)
 	if (dca)
 		ioat_dma->dca = ioat_dca_init(pdev, ioat_dma->reg_base);
 
+	/* disable relaxed ordering */
+	err = pcie_capability_read_word(pdev, IOAT_DEVCTRL_OFFSET, &val16);
+	if (err)
+		return err;
+
+	/* clear relaxed ordering enable */
+	val16 &= ~IOAT_DEVCTRL_ROE;
+	err = pcie_capability_write_word(pdev, IOAT_DEVCTRL_OFFSET, val16);
+	if (err)
+		return err;
+
 	return 0;
 }
 
@@ -1201,7 +1226,7 @@ static void ioat_shutdown(struct pci_dev *pdev)
 	ioat_disable_interrupts(ioat_dma);
 }
 
-void ioat_resume(struct ioatdma_device *ioat_dma)
+static void ioat_resume(struct ioatdma_device *ioat_dma)
 {
 	struct ioatdma_chan *ioat_chan;
 	u32 chanerr;
@@ -1339,6 +1364,8 @@ static int ioat_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	device->version = readb(device->reg_base + IOAT_VER_OFFSET);
 	if (device->version >= IOAT_VER_3_0) {
+		if (is_skx_ioat(pdev))
+			device->version = IOAT_VER_3_2;
 		err = ioat3_dma_probe(device, ioat_dca_enabled);
 
 		if (device->version >= IOAT_VER_3_3)

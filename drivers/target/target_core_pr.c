@@ -29,6 +29,8 @@
 #include <linux/list.h>
 #include <linux/vmalloc.h>
 #include <linux/file.h>
+#include <linux/fcntl.h>
+#include <linux/fs.h>
 #include <scsi/scsi_proto.h>
 #include <asm/unaligned.h>
 
@@ -253,8 +255,7 @@ target_scsi2_reservation_reserve(struct se_cmd *cmd)
 
 	if ((cmd->t_task_cdb[1] & 0x01) &&
 	    (cmd->t_task_cdb[1] & 0x02)) {
-		pr_err("LongIO and Obselete Bits set, returning"
-				" ILLEGAL_REQUEST\n");
+		pr_err("LongIO and Obsolete Bits set, returning ILLEGAL_REQUEST\n");
 		return TCM_UNSUPPORTED_SCSI_OPCODE;
 	}
 	/*
@@ -1985,7 +1986,7 @@ static int __core_scsi3_write_aptpl_to_file(
 		return -EMSGSIZE;
 	}
 
-	snprintf(path, 512, "/var/target/pr/aptpl_%s", &wwn->unit_serial[0]);
+	snprintf(path, 512, "%s/pr/aptpl_%s", db_root, &wwn->unit_serial[0]);
 	file = filp_open(path, flags, 0600);
 	if (IS_ERR(file)) {
 		pr_err("filp_open(%s) for APTPL metadata"

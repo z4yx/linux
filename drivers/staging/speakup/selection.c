@@ -137,7 +137,7 @@ static void __speakup_paste_selection(struct work_struct *work)
 	struct speakup_paste_work *spw =
 		container_of(work, struct speakup_paste_work, work);
 	struct tty_struct *tty = xchg(&spw->tty, NULL);
-	struct vc_data *vc = (struct vc_data *) tty->driver_data;
+	struct vc_data *vc = (struct vc_data *)tty->driver_data;
 	int pasted = 0, count;
 	struct tty_ldisc *ld;
 	DECLARE_WAITQUEUE(wait, current);
@@ -150,7 +150,7 @@ static void __speakup_paste_selection(struct work_struct *work)
 	add_wait_queue(&vc->paste_wait, &wait);
 	while (sel_buffer && sel_buffer_lth > pasted) {
 		set_current_state(TASK_INTERRUPTIBLE);
-		if (test_bit(TTY_THROTTLED, &tty->flags)) {
+		if (tty_throttled(tty)) {
 			schedule();
 			continue;
 		}

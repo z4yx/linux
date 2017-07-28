@@ -31,7 +31,7 @@
 #include <linux/rcupdate.h>
 
 #include <asm/reg.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/io.h>
 #include <asm/pgtable.h>
 #include <asm/hwrpb.h>
@@ -209,14 +209,6 @@ start_thread(struct pt_regs * regs, unsigned long pc, unsigned long sp)
 	wrusp(sp);
 }
 EXPORT_SYMBOL(start_thread);
-
-/*
- * Free current thread data structures etc..
- */
-void
-exit_thread(void)
-{
-}
 
 void
 flush_thread(void)

@@ -14,7 +14,7 @@
 #include <linux/init.h>
 #include <linux/debugfs.h>
 #include <asm/mce.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "mce-internal.h"
 
@@ -204,6 +204,33 @@ static int error_context(struct mce *m)
 	return IN_KERNEL;
 }
 
+static int mce_severity_amd_smca(struct mce *m, int err_ctx)
+{
+	u32 addr = MSR_AMD64_SMCA_MCx_CONFIG(m->bank);
+	u32 low, high;
+
+	/*
+	 * We need to look at the following bits:
+	 * - "succor" bit (data poisoning support), and
+	 * - TCC bit (Task Context Corrupt)
+	 * in MCi_STATUS to determine error severity.
+	 */
+	if (!mce_flags.succor)
+		return MCE_PANIC_SEVERITY;
+
+	if (rdmsr_safe(addr, &low, &high))
+		return MCE_PANIC_SEVERITY;
+
+	/* TCC (Task context corrupt). If set and if IN_KERNEL, panic. */
+	if ((low & MCI_CONFIG_MCAX) &&
+	    (m->status & MCI_STATUS_TCC) &&
+	    (err_ctx == IN_KERNEL))
+		return MCE_PANIC_SEVERITY;
+
+	 /* ...otherwise invoke hwpoison handler. */
+	return MCE_AR_SEVERITY;
+}
+
 /*
  * See AMD Error Scope Hierarchy table in a newer BKDG. For example
  * 49125_15h_Models_30h-3Fh_BKDG.pdf, section "RAS Features"
@@ -225,6 +252,9 @@ static int mce_severity_amd(struct mce *m, int tolerant, char **msg, bool is_exc
 		 * to at least kill process to prolong system operation.
 		 */
 		if (mce_flags.overflow_recov) {
+			if (mce_flags.smca)
+				return mce_severity_amd_smca(m, ctx);
+
 			/* software can try to contain */
 			if (!(m->mcgstatus & MCG_STATUS_RIPV) && (ctx == IN_KERNEL))
 				return MCE_PANIC_SEVERITY;
@@ -281,7 +311,7 @@ static int mce_severity_intel(struct mce *m, int tolerant, char **msg, bool is_e
 			*msg = s->msg;
 		s->covered = 1;
 		if (s->sev >= MCE_UC_SEVERITY && ctx == IN_KERNEL) {
-			if (panic_on_oops || tolerant < 1)
+			if (tolerant < 1)
 				return MCE_PANIC_SEVERITY;
 		}
 		return s->sev;

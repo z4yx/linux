@@ -264,6 +264,7 @@ dw_apb_clockevent_init(int cpu, const char *name, unsigned rating,
 	dw_ced->ced.set_state_shutdown = apbt_shutdown;
 	dw_ced->ced.set_state_periodic = apbt_set_periodic;
 	dw_ced->ced.set_state_oneshot = apbt_set_oneshot;
+	dw_ced->ced.set_state_oneshot_stopped = apbt_shutdown;
 	dw_ced->ced.tick_resume = apbt_resume;
 	dw_ced->ced.set_next_event = apbt_next_event;
 	dw_ced->ced.irq = dw_ced->timer.irq;
@@ -347,7 +348,7 @@ void dw_apb_clocksource_start(struct dw_apb_clocksource *dw_cs)
 	dw_apb_clocksource_read(dw_cs);
 }
 
-static cycle_t __apbt_read_clocksource(struct clocksource *cs)
+static u64 __apbt_read_clocksource(struct clocksource *cs)
 {
 	u32 current_count;
 	struct dw_apb_clocksource *dw_cs =
@@ -356,7 +357,7 @@ static cycle_t __apbt_read_clocksource(struct clocksource *cs)
 	current_count = apbt_readl_relaxed(&dw_cs->timer,
 					APBTMR_N_CURRENT_VALUE);
 
-	return (cycle_t)~current_count;
+	return (u64)~current_count;
 }
 
 static void apbt_restart_clocksource(struct clocksource *cs)
@@ -415,7 +416,7 @@ void dw_apb_clocksource_register(struct dw_apb_clocksource *dw_cs)
  *
  * @dw_cs:	The clocksource to read.
  */
-cycle_t dw_apb_clocksource_read(struct dw_apb_clocksource *dw_cs)
+u64 dw_apb_clocksource_read(struct dw_apb_clocksource *dw_cs)
 {
-	return (cycle_t)~apbt_readl(&dw_cs->timer, APBTMR_N_CURRENT_VALUE);
+	return (u64)~apbt_readl(&dw_cs->timer, APBTMR_N_CURRENT_VALUE);
 }

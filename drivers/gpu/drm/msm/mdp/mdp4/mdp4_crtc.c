@@ -121,7 +121,7 @@ static void complete_flip(struct drm_crtc *crtc, struct drm_file *file)
 		if (!file || (event->base.file_priv == file)) {
 			mdp4_crtc->event = NULL;
 			DBG("%s: send event: %p", mdp4_crtc->name, event);
-			drm_send_vblank_event(dev, mdp4_crtc->id, event);
+			drm_crtc_send_vblank_event(crtc, event);
 		}
 	}
 	spin_unlock_irqrestore(&dev->event_lock, flags);
@@ -373,7 +373,7 @@ static void update_cursor(struct drm_crtc *crtc)
 	if (mdp4_crtc->cursor.stale) {
 		struct drm_gem_object *next_bo = mdp4_crtc->cursor.next_bo;
 		struct drm_gem_object *prev_bo = mdp4_crtc->cursor.scanout_bo;
-		uint32_t iova = mdp4_crtc->cursor.next_iova;
+		uint64_t iova = mdp4_crtc->cursor.next_iova;
 
 		if (next_bo) {
 			/* take a obj ref + iova ref when we start scanning out: */
@@ -418,7 +418,7 @@ static int mdp4_crtc_cursor_set(struct drm_crtc *crtc,
 	struct drm_device *dev = crtc->dev;
 	struct drm_gem_object *cursor_bo, *old_bo;
 	unsigned long flags;
-	uint32_t iova;
+	uint64_t iova;
 	int ret;
 
 	if ((width > CURSOR_WIDTH) || (height > CURSOR_HEIGHT)) {
@@ -427,7 +427,7 @@ static int mdp4_crtc_cursor_set(struct drm_crtc *crtc,
 	}
 
 	if (handle) {
-		cursor_bo = drm_gem_object_lookup(dev, file_priv, handle);
+		cursor_bo = drm_gem_object_lookup(file_priv, handle);
 		if (!cursor_bo)
 			return -ENOENT;
 	} else {

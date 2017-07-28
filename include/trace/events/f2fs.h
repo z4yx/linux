@@ -31,10 +31,9 @@ TRACE_DEFINE_ENUM(BG_GC);
 TRACE_DEFINE_ENUM(LFS);
 TRACE_DEFINE_ENUM(SSR);
 TRACE_DEFINE_ENUM(__REQ_RAHEAD);
-TRACE_DEFINE_ENUM(__REQ_WRITE);
 TRACE_DEFINE_ENUM(__REQ_SYNC);
-TRACE_DEFINE_ENUM(__REQ_NOIDLE);
-TRACE_DEFINE_ENUM(__REQ_FLUSH);
+TRACE_DEFINE_ENUM(__REQ_IDLE);
+TRACE_DEFINE_ENUM(__REQ_PREFLUSH);
 TRACE_DEFINE_ENUM(__REQ_FUA);
 TRACE_DEFINE_ENUM(__REQ_PRIO);
 TRACE_DEFINE_ENUM(__REQ_META);
@@ -56,21 +55,19 @@ TRACE_DEFINE_ENUM(CP_DISCARD);
 		{ IPU,		"IN-PLACE" },				\
 		{ OPU,		"OUT-OF-PLACE" })
 
-#define F2FS_BIO_MASK(t)	(t & (READA | WRITE_FLUSH_FUA))
+#define F2FS_BIO_FLAG_MASK(t)	(t & (REQ_RAHEAD | REQ_PREFLUSH | REQ_FUA))
 #define F2FS_BIO_EXTRA_MASK(t)	(t & (REQ_META | REQ_PRIO))
 
-#define show_bio_type(type)	show_bio_base(type), show_bio_extra(type)
+#define show_bio_type(op_flags)	show_bio_op_flags(op_flags), 		\
+						show_bio_extra(op_flags)
 
-#define show_bio_base(type)						\
-	__print_symbolic(F2FS_BIO_MASK(type),				\
-		{ READ, 		"READ" },			\
-		{ READA, 		"READAHEAD" },			\
-		{ READ_SYNC, 		"READ_SYNC" },			\
-		{ WRITE, 		"WRITE" },			\
-		{ WRITE_SYNC, 		"WRITE_SYNC" },			\
-		{ WRITE_FLUSH,		"WRITE_FLUSH" },		\
-		{ WRITE_FUA, 		"WRITE_FUA" },			\
-		{ WRITE_FLUSH_FUA,	"WRITE_FLUSH_FUA" })
+#define show_bio_op_flags(flags)					\
+	__print_symbolic(F2FS_BIO_FLAG_MASK(flags),			\
+		{ 0,			"WRITE" },			\
+		{ REQ_RAHEAD, 		"READAHEAD" },			\
+		{ REQ_SYNC, 		"REQ_SYNC" },			\
+		{ REQ_PREFLUSH,		"REQ_PREFLUSH" },		\
+		{ REQ_FUA,		"REQ_FUA" })
 
 #define show_bio_extra(type)						\
 	__print_symbolic(F2FS_BIO_EXTRA_MASK(type),			\
@@ -694,28 +691,32 @@ TRACE_EVENT(f2fs_direct_IO_exit,
 		__entry->ret)
 );
 
-TRACE_EVENT(f2fs_reserve_new_block,
+TRACE_EVENT(f2fs_reserve_new_blocks,
 
-	TP_PROTO(struct inode *inode, nid_t nid, unsigned int ofs_in_node),
+	TP_PROTO(struct inode *inode, nid_t nid, unsigned int ofs_in_node,
+							blkcnt_t count),
 
-	TP_ARGS(inode, nid, ofs_in_node),
+	TP_ARGS(inode, nid, ofs_in_node, count),
 
 	TP_STRUCT__entry(
 		__field(dev_t,	dev)
 		__field(nid_t, nid)
 		__field(unsigned int, ofs_in_node)
+		__field(blkcnt_t, count)
 	),
 
 	TP_fast_assign(
 		__entry->dev	= inode->i_sb->s_dev;
 		__entry->nid	= nid;
 		__entry->ofs_in_node = ofs_in_node;
+		__entry->count = count;
 	),
 
-	TP_printk("dev = (%d,%d), nid = %u, ofs_in_node = %u",
+	TP_printk("dev = (%d,%d), nid = %u, ofs_in_node = %u, count = %llu",
 		show_dev(__entry),
 		(unsigned int)__entry->nid,
-		__entry->ofs_in_node)
+		__entry->ofs_in_node,
+		(unsigned long long)__entry->count)
 );
 
 DECLARE_EVENT_CLASS(f2fs__submit_page_bio,
@@ -730,7 +731,8 @@ DECLARE_EVENT_CLASS(f2fs__submit_page_bio,
 		__field(pgoff_t, index)
 		__field(block_t, old_blkaddr)
 		__field(block_t, new_blkaddr)
-		__field(int, rw)
+		__field(int, op)
+		__field(int, op_flags)
 		__field(int, type)
 	),
 
@@ -740,17 +742,18 @@ DECLARE_EVENT_CLASS(f2fs__submit_page_bio,
 		__entry->index		= page->index;
 		__entry->old_blkaddr	= fio->old_blkaddr;
 		__entry->new_blkaddr	= fio->new_blkaddr;
-		__entry->rw		= fio->rw;
+		__entry->op		= fio->op;
+		__entry->op_flags	= fio->op_flags;
 		__entry->type		= fio->type;
 	),
 
 	TP_printk("dev = (%d,%d), ino = %lu, page_index = 0x%lx, "
-		"oldaddr = 0x%llx, newaddr = 0x%llx rw = %s%s, type = %s",
+		"oldaddr = 0x%llx, newaddr = 0x%llx, rw = %s%s, type = %s",
 		show_dev_ino(__entry),
 		(unsigned long)__entry->index,
 		(unsigned long long)__entry->old_blkaddr,
 		(unsigned long long)__entry->new_blkaddr,
-		show_bio_type(__entry->rw),
+		show_bio_type(__entry->op_flags),
 		show_block_type(__entry->type))
 );
 
@@ -781,7 +784,8 @@ DECLARE_EVENT_CLASS(f2fs__submit_bio,
 
 	TP_STRUCT__entry(
 		__field(dev_t,	dev)
-		__field(int,	rw)
+		__field(int,	op)
+		__field(int,	op_flags)
 		__field(int,	type)
 		__field(sector_t,	sector)
 		__field(unsigned int,	size)
@@ -789,15 +793,16 @@ DECLARE_EVENT_CLASS(f2fs__submit_bio,
 
 	TP_fast_assign(
 		__entry->dev		= sb->s_dev;
-		__entry->rw		= fio->rw;
+		__entry->op		= fio->op;
+		__entry->op_flags	= fio->op_flags;
 		__entry->type		= fio->type;
 		__entry->sector		= bio->bi_iter.bi_sector;
 		__entry->size		= bio->bi_iter.bi_size;
 	),
 
-	TP_printk("dev = (%d,%d), %s%s, %s, sector = %lld, size = %u",
+	TP_printk("dev = (%d,%d), rw = %s%s, %s, sector = %lld, size = %u",
 		show_dev(__entry),
-		show_bio_type(__entry->rw),
+		show_bio_type(__entry->op_flags),
 		show_block_type(__entry->type),
 		(unsigned long long)__entry->sector,
 		__entry->size)
@@ -1106,6 +1111,27 @@ TRACE_EVENT(f2fs_issue_discard,
 		(unsigned long long)__entry->blklen)
 );
 
+TRACE_EVENT(f2fs_issue_reset_zone,
+
+	TP_PROTO(struct super_block *sb, block_t blkstart),
+
+	TP_ARGS(sb, blkstart),
+
+	TP_STRUCT__entry(
+		__field(dev_t,	dev)
+		__field(block_t, blkstart)
+	),
+
+	TP_fast_assign(
+		__entry->dev	= sb->s_dev;
+		__entry->blkstart = blkstart;
+	),
+
+	TP_printk("dev = (%d,%d), reset zone at block = 0x%llx",
+		show_dev(__entry),
+		(unsigned long long)__entry->blkstart)
+);
+
 TRACE_EVENT(f2fs_issue_flush,
 
 	TP_PROTO(struct super_block *sb, unsigned int nobarrier,
@@ -1271,14 +1297,14 @@ TRACE_EVENT(f2fs_destroy_extent_tree,
 
 DECLARE_EVENT_CLASS(f2fs_sync_dirty_inodes,
 
-	TP_PROTO(struct super_block *sb, int type, int count),
+	TP_PROTO(struct super_block *sb, int type, s64 count),
 
 	TP_ARGS(sb, type, count),
 
 	TP_STRUCT__entry(
 		__field(dev_t, dev)
 		__field(int, type)
-		__field(int, count)
+		__field(s64, count)
 	),
 
 	TP_fast_assign(
@@ -1287,7 +1313,7 @@ DECLARE_EVENT_CLASS(f2fs_sync_dirty_inodes,
 		__entry->count	= count;
 	),
 
-	TP_printk("dev = (%d,%d), %s, dirty count = %d",
+	TP_printk("dev = (%d,%d), %s, dirty count = %lld",
 		show_dev(__entry),
 		show_file_type(__entry->type),
 		__entry->count)
@@ -1295,14 +1321,14 @@ DECLARE_EVENT_CLASS(f2fs_sync_dirty_inodes,
 
 DEFINE_EVENT(f2fs_sync_dirty_inodes, f2fs_sync_dirty_inodes_enter,
 
-	TP_PROTO(struct super_block *sb, int type, int count),
+	TP_PROTO(struct super_block *sb, int type, s64 count),
 
 	TP_ARGS(sb, type, count)
 );
 
 DEFINE_EVENT(f2fs_sync_dirty_inodes, f2fs_sync_dirty_inodes_exit,
 
-	TP_PROTO(struct super_block *sb, int type, int count),
+	TP_PROTO(struct super_block *sb, int type, s64 count),
 
 	TP_ARGS(sb, type, count)
 );

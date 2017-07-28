@@ -68,7 +68,7 @@
 #include <linux/poll.h>
 #include <linux/miscdevice.h>
 #endif
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <acpi/video.h>
 
 #define dprintk(fmt, ...)			\
@@ -1445,6 +1445,9 @@ static void sony_nc_function_setup(struct acpi_device *device,
 static void sony_nc_function_cleanup(struct platform_device *pd)
 {
 	unsigned int i, result, bitmask, handle;
+
+	if (!handles)
+		return;
 
 	/* get enabled events and disable them */
 	sony_nc_int_call(sony_nc_acpi_handle, "SN01", NULL, &bitmask);
@@ -4113,7 +4116,7 @@ static ssize_t sonypi_misc_read(struct file *file, char __user *buf,
 
 	if (ret > 0) {
 		struct inode *inode = file_inode(file);
-		inode->i_atime = current_fs_time(inode->i_sb);
+		inode->i_atime = current_time(inode);
 	}
 
 	return ret;

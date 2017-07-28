@@ -163,7 +163,7 @@ static void isp1761_pci_shutdown(struct pci_dev *dev)
 	printk(KERN_ERR "ips1761_pci_shutdown\n");
 }
 
-static const struct pci_device_id isp1760_plx [] = {
+static const struct pci_device_id isp1760_plx[] = {
 	{
 		.class          = PCI_CLASS_BRIDGE_OTHER << 8,
 		.class_mask     = ~0,
@@ -197,7 +197,7 @@ static int isp1760_plat_probe(struct platform_device *pdev)
 
 	irq_res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!irq_res) {
-		pr_warning("isp1760: IRQ resource not available\n");
+		pr_warn("isp1760: IRQ resource not available\n");
 		return -ENODEV;
 	}
 	irqflags = irq_res->flags & IRQF_TRIGGER_MASK;

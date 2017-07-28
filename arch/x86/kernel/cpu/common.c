@@ -2,7 +2,7 @@
 #include <linux/linkage.h>
 #include <linux/bitops.h>
 #include <linux/kernel.h>
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/percpu.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
@@ -37,6 +37,7 @@
 #include <asm/mtrr.h>
 #include <linux/numa.h>
 #include <asm/asm.h>
+#include <asm/bugs.h>
 #include <asm/cpu.h>
 #include <asm/mce.h>
 #include <asm/msr.h>
@@ -270,6 +271,8 @@ static inline void squash_the_stupid_serial_number(struct cpuinfo_x86 *c)
 static __init int setup_disable_smep(char *arg)
 {
 	setup_clear_cpu_cap(X86_FEATURE_SMEP);
+	/* Check for things that depend on SMEP being enabled: */
+	check_mpx_erratum(&boot_cpu_data);
 	return 1;
 }
 __setup("nosmep", setup_disable_smep);
@@ -310,6 +313,10 @@ static bool pku_disabled;
 
 static __always_inline void setup_pku(struct cpuinfo_x86 *c)
 {
+	/* check the boot processor, plus compile options for PKU: */
+	if (!cpu_feature_enabled(X86_FEATURE_PKU))
+		return;
+	/* checks the actual processor's cpuid bits: */
 	if (!cpu_has(c, X86_FEATURE_PKU))
 		return;
 	if (pku_disabled)
@@ -430,7 +437,7 @@ void load_percpu_segment(int cpu)
 #ifdef CONFIG_X86_32
 	loadsegment(fs, __KERNEL_PERCPU);
 #else
-	loadsegment(gs, 0);
+	__loadsegment_simple(gs, 0);
 	wrmsrl(MSR_GS_BASE, (unsigned long)per_cpu(irq_stack_union.gs_base, cpu));
 #endif
 	load_stack_canary_segment();
@@ -660,13 +667,14 @@ void get_cpu_cap(struct cpuinfo_x86 *c)
 		c->x86_capability[CPUID_1_EDX] = edx;
 	}
 
+	/* Thermal and Power Management Leaf: level 0x00000006 (eax) */
+	if (c->cpuid_level >= 0x00000006)
+		c->x86_capability[CPUID_6_EAX] = cpuid_eax(0x00000006);
+
 	/* Additional Intel-defined flags: level 0x00000007 */
 	if (c->cpuid_level >= 0x00000007) {
 		cpuid_count(0x00000007, 0, &eax, &ebx, &ecx, &edx);
-
 		c->x86_capability[CPUID_7_0_EBX] = ebx;
-
-		c->x86_capability[CPUID_6_EAX] = cpuid_eax(0x00000006);
 		c->x86_capability[CPUID_7_ECX] = ecx;
 	}
 
@@ -717,6 +725,13 @@ void get_cpu_cap(struct cpuinfo_x86 *c)
 		}
 	}
 
+	if (c->extended_cpuid_level >= 0x80000007) {
+		cpuid(0x80000007, &eax, &ebx, &ecx, &edx);
+
+		c->x86_capability[CPUID_8000_0007_EBX] = ebx;
+		c->x86_power = edx;
+	}
+
 	if (c->extended_cpuid_level >= 0x80000008) {
 		cpuid(0x80000008, &eax, &ebx, &ecx, &edx);
 
@@ -728,9 +743,6 @@ void get_cpu_cap(struct cpuinfo_x86 *c)
 	else if (cpu_has(c, X86_FEATURE_PAE) || cpu_has(c, X86_FEATURE_PSE36))
 		c->x86_phys_bits = 36;
 #endif
-
-	if (c->extended_cpuid_level >= 0x80000007)
-		c->x86_power = cpuid_edx(0x80000007);
 
 	if (c->extended_cpuid_level >= 0x8000000a)
 		c->x86_capability[CPUID_8000_000A_EDX] = cpuid_edx(0x8000000a);
@@ -793,21 +805,20 @@ static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 		identify_cpu_without_cpuid(c);
 
 	/* cyrix could have cpuid enabled via c_identify()*/
-	if (!have_cpuid_p())
-		return;
+	if (have_cpuid_p()) {
+		cpu_detect(c);
+		get_cpu_vendor(c);
+		get_cpu_cap(c);
 
-	cpu_detect(c);
-	get_cpu_vendor(c);
-	get_cpu_cap(c);
+		if (this_cpu->c_early_init)
+			this_cpu->c_early_init(c);
 
-	if (this_cpu->c_early_init)
-		this_cpu->c_early_init(c);
+		c->cpu_index = 0;
+		filter_cpuid_features(c, false);
 
-	c->cpu_index = 0;
-	filter_cpuid_features(c, false);
-
-	if (this_cpu->c_bsp_init)
-		this_cpu->c_bsp_init(c);
+		if (this_cpu->c_bsp_init)
+			this_cpu->c_bsp_init(c);
+	}
 
 	setup_force_cpu_cap(X86_FEATURE_ALWAYS);
 	fpu__init_system(c);
@@ -862,30 +873,34 @@ static void detect_nopl(struct cpuinfo_x86 *c)
 #else
 	set_cpu_cap(c, X86_FEATURE_NOPL);
 #endif
+}
 
+static void detect_null_seg_behavior(struct cpuinfo_x86 *c)
+{
+#ifdef CONFIG_X86_64
 	/*
-	 * ESPFIX is a strange bug.  All real CPUs have it.  Paravirt
-	 * systems that run Linux at CPL > 0 may or may not have the
-	 * issue, but, even if they have the issue, there's absolutely
-	 * nothing we can do about it because we can't use the real IRET
-	 * instruction.
+	 * Empirically, writing zero to a segment selector on AMD does
+	 * not clear the base, whereas writing zero to a segment
+	 * selector on Intel does clear the base.  Intel's behavior
+	 * allows slightly faster context switches in the common case
+	 * where GS is unused by the prev and next threads.
 	 *
-	 * NB: For the time being, only 32-bit kernels support
-	 * X86_BUG_ESPFIX as such.  64-bit kernels directly choose
-	 * whether to apply espfix using paravirt hooks.  If any
-	 * non-paravirt system ever shows up that does *not* have the
-	 * ESPFIX issue, we can change this.
+	 * Since neither vendor documents this anywhere that I can see,
+	 * detect it directly instead of hardcoding the choice by
+	 * vendor.
+	 *
+	 * I've designated AMD's behavior as the "bug" because it's
+	 * counterintuitive and less friendly.
 	 */
-#ifdef CONFIG_X86_32
-#ifdef CONFIG_PARAVIRT
-	do {
-		extern void native_iret(void);
-		if (pv_cpu_ops.iret == native_iret)
-			set_cpu_bug(c, X86_BUG_ESPFIX);
-	} while (0);
-#else
-	set_cpu_bug(c, X86_BUG_ESPFIX);
-#endif
+
+	unsigned long old_base, tmp;
+	rdmsrl(MSR_FS_BASE, old_base);
+	wrmsrl(MSR_FS_BASE, 1);
+	loadsegment(fs, 0);
+	rdmsrl(MSR_FS_BASE, tmp);
+	if (tmp != 0)
+		set_cpu_bug(c, X86_BUG_NULL_SEG);
+	wrmsrl(MSR_FS_BASE, old_base);
 #endif
 }
 
@@ -921,6 +936,33 @@ static void generic_identify(struct cpuinfo_x86 *c)
 	get_model_name(c); /* Default name */
 
 	detect_nopl(c);
+
+	detect_null_seg_behavior(c);
+
+	/*
+	 * ESPFIX is a strange bug.  All real CPUs have it.  Paravirt
+	 * systems that run Linux at CPL > 0 may or may not have the
+	 * issue, but, even if they have the issue, there's absolutely
+	 * nothing we can do about it because we can't use the real IRET
+	 * instruction.
+	 *
+	 * NB: For the time being, only 32-bit kernels support
+	 * X86_BUG_ESPFIX as such.  64-bit kernels directly choose
+	 * whether to apply espfix using paravirt hooks.  If any
+	 * non-paravirt system ever shows up that does *not* have the
+	 * ESPFIX issue, we can change this.
+	 */
+#ifdef CONFIG_X86_32
+# ifdef CONFIG_PARAVIRT
+	do {
+		extern void native_iret(void);
+		if (pv_cpu_ops.iret == native_iret)
+			set_cpu_bug(c, X86_BUG_ESPFIX);
+	} while (0);
+# else
+	set_cpu_bug(c, X86_BUG_ESPFIX);
+# endif
+#endif
 }
 
 static void x86_init_cache_qos(struct cpuinfo_x86 *c)
@@ -938,6 +980,27 @@ static void x86_init_cache_qos(struct cpuinfo_x86 *c)
 }
 
 /*
+ * Validate that ACPI/mptables have the same information about the
+ * effective APIC id and update the package map.
+ */
+static void validate_apic_and_package_id(struct cpuinfo_x86 *c)
+{
+#ifdef CONFIG_SMP
+	unsigned int apicid, cpu = smp_processor_id();
+
+	apicid = apic->cpu_present_to_apicid(cpu);
+
+	if (apicid != c->apicid) {
+		pr_err(FW_BUG "CPU%u: APIC id mismatch. Firmware: %x APIC: %x\n",
+		       cpu, apicid, c->initial_apicid);
+	}
+	BUG_ON(topology_update_package_map(c->phys_proc_id, cpu));
+#else
+	c->logical_proc_id = 0;
+#endif
+}
+
+/*
  * This does the hard work of actually picking apart the CPU stuff...
  */
 static void identify_cpu(struct cpuinfo_x86 *c)
@@ -952,6 +1015,7 @@ static void identify_cpu(struct cpuinfo_x86 *c)
 	c->x86_model_id[0] = '\0';  /* Unset */
 	c->x86_max_cores = 1;
 	c->x86_coreid_bits = 0;
+	c->cu_id = 0xff;
 #ifdef CONFIG_X86_64
 	c->x86_clflush_size = 64;
 	c->x86_phys_bits = 36;
@@ -1062,8 +1126,6 @@ static void identify_cpu(struct cpuinfo_x86 *c)
 #ifdef CONFIG_NUMA
 	numa_add_cpu(smp_processor_id());
 #endif
-	/* The boot/hotplug time assigment got cleared, restore it */
-	c->logical_proc_id = topology_phys_to_logical_pkg(c->phys_proc_id);
 }
 
 /*
@@ -1076,11 +1138,11 @@ void enable_sep_cpu(void)
 	struct tss_struct *tss;
 	int cpu;
 
+	if (!boot_cpu_has(X86_FEATURE_SEP))
+		return;
+
 	cpu = get_cpu();
 	tss = &per_cpu(cpu_tss, cpu);
-
-	if (!boot_cpu_has(X86_FEATURE_SEP))
-		goto out;
 
 	/*
 	 * We cache MSR_IA32_SYSENTER_CS's value in the TSS's ss1 field --
@@ -1096,7 +1158,6 @@ void enable_sep_cpu(void)
 
 	wrmsr(MSR_IA32_SYSENTER_EIP, (unsigned long)entry_SYSENTER_32, 0);
 
-out:
 	put_cpu();
 }
 #endif
@@ -1104,7 +1165,6 @@ out:
 void __init identify_boot_cpu(void)
 {
 	identify_cpu(&boot_cpu_data);
-	init_amd_e400_c1e_mask();
 #ifdef CONFIG_X86_32
 	sysenter_setup();
 	enable_sep_cpu();
@@ -1120,52 +1180,8 @@ void identify_secondary_cpu(struct cpuinfo_x86 *c)
 	enable_sep_cpu();
 #endif
 	mtrr_ap_init();
+	validate_apic_and_package_id(c);
 }
-
-struct msr_range {
-	unsigned	min;
-	unsigned	max;
-};
-
-static const struct msr_range msr_range_array[] = {
-	{ 0x00000000, 0x00000418},
-	{ 0xc0000000, 0xc000040b},
-	{ 0xc0010000, 0xc0010142},
-	{ 0xc0011000, 0xc001103b},
-};
-
-static void __print_cpu_msr(void)
-{
-	unsigned index_min, index_max;
-	unsigned index;
-	u64 val;
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(msr_range_array); i++) {
-		index_min = msr_range_array[i].min;
-		index_max = msr_range_array[i].max;
-
-		for (index = index_min; index < index_max; index++) {
-			if (rdmsrl_safe(index, &val))
-				continue;
-			pr_info(" MSR%08x: %016llx\n", index, val);
-		}
-	}
-}
-
-static int show_msr;
-
-static __init int setup_show_msr(char *arg)
-{
-	int num;
-
-	get_option(&arg, &num);
-
-	if (num > 0)
-		show_msr = num;
-	return 1;
-}
-__setup("show_msr=", setup_show_msr);
 
 static __init int setup_noclflush(char *arg)
 {
@@ -1200,21 +1216,13 @@ void print_cpu_info(struct cpuinfo_x86 *c)
 		pr_cont(", stepping: 0x%x)\n", c->x86_mask);
 	else
 		pr_cont(")\n");
-
-	print_cpu_msr(c);
-}
-
-void print_cpu_msr(struct cpuinfo_x86 *c)
-{
-	if (c->cpu_index < show_msr)
-		__print_cpu_msr();
 }
 
 static __init int setup_disablecpuid(char *arg)
 {
 	int bit;
 
-	if (get_option(&arg, &bit) && bit < NCAPINTS*32)
+	if (get_option(&arg, &bit) && bit >= 0 && bit < NCAPINTS * 32)
 		setup_clear_cpu_cap(bit);
 	else
 		return 0;
@@ -1224,9 +1232,14 @@ static __init int setup_disablecpuid(char *arg)
 __setup("clearcpuid=", setup_disablecpuid);
 
 #ifdef CONFIG_X86_64
-struct desc_ptr idt_descr = { NR_VECTORS * 16 - 1, (unsigned long) idt_table };
-struct desc_ptr debug_idt_descr = { NR_VECTORS * 16 - 1,
-				    (unsigned long) debug_idt_table };
+struct desc_ptr idt_descr __ro_after_init = {
+	.size = NR_VECTORS * 16 - 1,
+	.address = (unsigned long) idt_table,
+};
+const struct desc_ptr debug_idt_descr = {
+	.size = NR_VECTORS * 16 - 1,
+	.address = (unsigned long) debug_idt_table,
+};
 
 DEFINE_PER_CPU_FIRST(union irq_stack_union,
 		     irq_stack_union) __aligned(PAGE_SIZE) __visible;
@@ -1240,7 +1253,7 @@ DEFINE_PER_CPU(struct task_struct *, current_task) ____cacheline_aligned =
 EXPORT_PER_CPU_SYMBOL(current_task);
 
 DEFINE_PER_CPU(char *, irq_stack_ptr) =
-	init_per_cpu_var(irq_stack_union.irq_stack) + IRQ_STACK_SIZE - 64;
+	init_per_cpu_var(irq_stack_union.irq_stack) + IRQ_STACK_SIZE;
 
 DEFINE_PER_CPU(unsigned int, irq_count) __visible = -1;
 
@@ -1264,11 +1277,6 @@ static DEFINE_PER_CPU_PAGE_ALIGNED(char, exception_stacks
 /* May not be marked __init: used by software suspend */
 void syscall_init(void)
 {
-	/*
-	 * LSTAR and STAR live in a bit strange symbiosis.
-	 * They both write to the same internal register. STAR allows to
-	 * set CS/DS but only a 32bit target. LSTAR sets the 64bit rip.
-	 */
 	wrmsr(MSR_STAR, 0, (__USER32_CS << 16) | __KERNEL_CS);
 	wrmsrl(MSR_LSTAR, (unsigned long)entry_SYSCALL_64);
 
@@ -1411,7 +1419,7 @@ void cpu_init(void)
 	struct task_struct *me;
 	struct tss_struct *t;
 	unsigned long v;
-	int cpu = stack_smp_processor_id();
+	int cpu = raw_smp_processor_id();
 	int i;
 
 	wait_for_master_cpu(cpu);
@@ -1422,11 +1430,8 @@ void cpu_init(void)
 	 */
 	cr4_init_shadow();
 
-	/*
-	 * Load microcode on this cpu if a valid microcode is available.
-	 * This is early microcode loading procedure.
-	 */
-	load_ucode_ap();
+	if (cpu)
+		load_ucode_ap();
 
 	t = &per_cpu(cpu_tss, cpu);
 	oist = &per_cpu(orig_ist, cpu);
@@ -1528,7 +1533,7 @@ void cpu_init(void)
 	pr_info("Initializing CPU#%d\n", cpu);
 
 	if (cpu_feature_enabled(X86_FEATURE_VME) ||
-	    cpu_has_tsc ||
+	    boot_cpu_has(X86_FEATURE_TSC) ||
 	    boot_cpu_has(X86_FEATURE_DE))
 		cr4_clear_bits(X86_CR4_VME|X86_CR4_PVI|X86_CR4_TSD|X86_CR4_DE);
 

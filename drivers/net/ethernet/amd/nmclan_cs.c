@@ -151,7 +151,7 @@ Include Files
 #include <pcmcia/cistpl.h>
 #include <pcmcia/ds.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/io.h>
 
 /* ----------------------------------------------------------------------------
@@ -427,7 +427,6 @@ static const struct net_device_ops mace_netdev_ops = {
 	.ndo_set_config		= mace_config,
 	.ndo_get_stats		= mace_get_stats,
 	.ndo_set_rx_mode	= set_multicast_list,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -851,7 +850,7 @@ static void mace_tx_timeout(struct net_device *dev)
 #else /* #if RESET_ON_TIMEOUT */
   pr_cont("NOT resetting card\n");
 #endif /* #if RESET_ON_TIMEOUT */
-  dev->trans_start = jiffies; /* prevent tx timeout */
+  netif_trans_update(dev); /* prevent tx timeout */
   netif_wake_queue(dev);
 }
 

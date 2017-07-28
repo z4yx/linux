@@ -353,10 +353,6 @@ static enum i40iw_status_code add_pble_pool(struct i40iw_sc_dev *dev,
 	pages = (idx->rel_pd_idx) ? (I40IW_HMC_PD_CNT_IN_SD -
 			idx->rel_pd_idx) : I40IW_HMC_PD_CNT_IN_SD;
 	pages = min(pages, pble_rsrc->unallocated_pble >> PBLE_512_SHIFT);
-	if (!pages) {
-		ret_code = I40IW_ERR_NO_PBLCHUNKS_AVAILABLE;
-		goto error;
-	}
 	info.chunk = chunk;
 	info.hmc_info = hmc_info;
 	info.pages = pages;
@@ -404,13 +400,14 @@ static enum i40iw_status_code add_pble_pool(struct i40iw_sc_dev *dev,
 			sd_entry->u.pd_table.pd_page_addr.pa : sd_entry->u.bp.addr.pa;
 	if (sd_entry->valid)
 		return 0;
-	if (dev->is_pf)
+	if (dev->is_pf) {
 		ret_code = i40iw_hmc_sd_one(dev, hmc_info->hmc_fn_id,
 					    sd_reg_val, idx->sd_idx,
 					    sd_entry->entry_type, true);
-	if (ret_code) {
-		i40iw_pr_err("cqp cmd failed for sd (pbles)\n");
-		goto error;
+		if (ret_code) {
+			i40iw_pr_err("cqp cmd failed for sd (pbles)\n");
+			goto error;
+		}
 	}
 
 	sd_entry->valid = true;

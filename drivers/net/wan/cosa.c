@@ -432,7 +432,6 @@ module_exit(cosa_exit);
 static const struct net_device_ops cosa_ops = {
 	.ndo_open       = cosa_net_open,
 	.ndo_stop       = cosa_net_close,
-	.ndo_change_mtu = hdlc_change_mtu,
 	.ndo_start_xmit = hdlc_start_xmit,
 	.ndo_do_ioctl   = cosa_net_ioctl,
 	.ndo_tx_timeout = cosa_net_timeout,
@@ -739,7 +738,7 @@ static char *cosa_net_setup_rx(struct channel_data *chan, int size)
 		chan->netdev->stats.rx_dropped++;
 		return NULL;
 	}
-	chan->netdev->trans_start = jiffies;
+	netif_trans_update(chan->netdev);
 	return skb_put(chan->rx_skb, size);
 }
 

@@ -63,7 +63,6 @@ static unsigned int table_size, table_cnt;
 static int all_symbols = 0;
 static int absolute_percpu = 0;
 static char symbol_prefix_char = '\0';
-static unsigned long long kernel_start_addr = 0;
 static int base_relative = 0;
 
 int token_profit[0x10000];
@@ -77,7 +76,6 @@ static void usage(void)
 {
 	fprintf(stderr, "Usage: kallsyms [--all-symbols] "
 			"[--symbol-prefix=<prefix char>] "
-			"[--page-offset=<CONFIG_PAGE_OFFSET>] "
 			"[--base-relative] < in.map > out.S\n");
 	exit(1);
 }
@@ -221,16 +219,18 @@ static int symbol_valid(struct sym_entry *s)
 		"_SDA2_BASE_",		/* ppc */
 		NULL };
 
+	static char *special_prefixes[] = {
+		"__crc_",		/* modversions */
+		NULL };
+
 	static char *special_suffixes[] = {
 		"_veneer",		/* arm */
+		"_from_arm",		/* arm */
+		"_from_thumb",		/* arm */
 		NULL };
 
 	int i;
 	char *sym_name = (char *)s->sym + 1;
-
-
-	if (s->addr < kernel_start_addr)
-		return 0;
 
 	/* skip prefix char */
 	if (symbol_prefix_char && *sym_name == symbol_prefix_char)
@@ -262,6 +262,14 @@ static int symbol_valid(struct sym_entry *s)
 	for (i = 0; special_symbols[i]; i++)
 		if (strcmp(sym_name, special_symbols[i]) == 0)
 			return 0;
+
+	for (i = 0; special_prefixes[i]; i++) {
+		int l = strlen(special_prefixes[i]);
+
+		if (l <= strlen(sym_name) &&
+		    strncmp(sym_name, special_prefixes[i], l) == 0)
+			return 0;
+	}
 
 	for (i = 0; special_suffixes[i]; i++) {
 		int l = strlen(sym_name) - strlen(special_suffixes[i]);
@@ -765,9 +773,6 @@ int main(int argc, char **argv)
 				if ((*p == '"' && *(p+2) == '"') || (*p == '\'' && *(p+2) == '\''))
 					p++;
 				symbol_prefix_char = *p;
-			} else if (strncmp(argv[i], "--page-offset=", 14) == 0) {
-				const char *p = &argv[i][14];
-				kernel_start_addr = strtoull(p, NULL, 16);
 			} else if (strcmp(argv[i], "--base-relative") == 0)
 				base_relative = 1;
 			else

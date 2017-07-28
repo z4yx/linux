@@ -14,7 +14,8 @@
 #include <linux/prefetch.h>
 #include <asm/sstep.h>
 #include <asm/processor.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
+#include <asm/cpu_has_feature.h>
 #include <asm/cputable.h>
 
 extern char system_call_common[];
@@ -493,10 +494,7 @@ static int __kprobes do_vsx_store(int rn, int (*func)(int, unsigned long),
 		"3:	li	%0,%4\n"		\
 		"	b	2b\n"			\
 		".previous\n"				\
-		".section __ex_table,\"a\"\n"		\
-			PPC_LONG_ALIGN "\n"		\
-			PPC_LONG "1b,3b\n"		\
-		".previous"				\
+		EX_TABLE(1b, 3b)			\
 		: "=r" (err), "=r" (cr)			\
 		: "r" (x), "r" (addr), "i" (-EFAULT), "0" (err))
 
@@ -508,10 +506,7 @@ static int __kprobes do_vsx_store(int rn, int (*func)(int, unsigned long),
 		"3:	li	%0,%3\n"		\
 		"	b	2b\n"			\
 		".previous\n"				\
-		".section __ex_table,\"a\"\n"		\
-			PPC_LONG_ALIGN "\n"		\
-			PPC_LONG "1b,3b\n"		\
-		".previous"				\
+		EX_TABLE(1b, 3b)			\
 		: "=r" (err), "=r" (x)			\
 		: "r" (addr), "i" (-EFAULT), "0" (err))
 
@@ -523,10 +518,7 @@ static int __kprobes do_vsx_store(int rn, int (*func)(int, unsigned long),
 		"3:	li	%0,%3\n"		\
 		"	b	2b\n"			\
 		".previous\n"				\
-		".section __ex_table,\"a\"\n"		\
-			PPC_LONG_ALIGN "\n"		\
-			PPC_LONG "1b,3b\n"		\
-		".previous"				\
+		EX_TABLE(1b, 3b)			\
 		: "=r" (err)				\
 		: "r" (addr), "i" (-EFAULT), "0" (err))
 
@@ -925,6 +917,7 @@ int __kprobes analyse_instr(struct instruction_op *op, struct pt_regs *regs,
 			}
 		}
 #endif
+	break; /* illegal instruction */
 
 	case 31:
 		switch ((instr >> 1) & 0x3ff) {
@@ -1818,9 +1811,11 @@ int __kprobes emulate_step(struct pt_regs *regs, unsigned int instr)
 		case 4:
 			__get_user_asmx(val, op.ea, err, "lwarx");
 			break;
+#ifdef __powerpc64__
 		case 8:
 			__get_user_asmx(val, op.ea, err, "ldarx");
 			break;
+#endif
 		default:
 			return 0;
 		}
@@ -1841,9 +1836,11 @@ int __kprobes emulate_step(struct pt_regs *regs, unsigned int instr)
 		case 4:
 			__put_user_asmx(op.val, op.ea, err, "stwcx.", cr);
 			break;
+#ifdef __powerpc64__
 		case 8:
 			__put_user_asmx(op.val, op.ea, err, "stdcx.", cr);
 			break;
+#endif
 		default:
 			return 0;
 		}

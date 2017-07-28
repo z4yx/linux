@@ -39,15 +39,23 @@ static void public_key_describe(const struct key *asymmetric_key,
 /*
  * Destroy a public key algorithm key.
  */
-void public_key_destroy(void *payload)
+void public_key_free(struct public_key *key)
 {
-	struct public_key *key = payload;
-
-	if (key)
+	if (key) {
 		kfree(key->key);
-	kfree(key);
+		kfree(key);
+	}
 }
-EXPORT_SYMBOL_GPL(public_key_destroy);
+EXPORT_SYMBOL_GPL(public_key_free);
+
+/*
+ * Destroy a public key algorithm key.
+ */
+static void public_key_destroy(void *payload0, void *payload3)
+{
+	public_key_free(payload0);
+	public_key_signature_free(payload3);
+}
 
 struct public_key_completion {
 	struct completion completion;
@@ -113,6 +121,7 @@ int public_key_verify_signature(const struct public_key *pkey,
 	if (ret)
 		goto error_free_req;
 
+	ret = -ENOMEM;
 	outlen = crypto_akcipher_maxsize(tfm);
 	output = kmalloc(outlen, GFP_KERNEL);
 	if (!output)

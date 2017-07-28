@@ -637,10 +637,10 @@ int aac_fib_send(u16 command, struct fib *fibptr, unsigned long size,
 					}
 					return -EFAULT;
 				}
-				/* We used to udelay() here but that absorbed
-				 * a CPU when a timeout occured. Not very
-				 * useful. */
-				cpu_relax();
+				/*
+				 * Allow other processes / CPUS to use core
+				 */
+				schedule();
 			}
 		} else if (down_interruptible(&fibptr->event_wait)) {
 			/* Do nothing ... satisfy
@@ -901,6 +901,31 @@ void aac_printf(struct aac_dev *dev, u32 val)
 	memset(cp, 0, 256);
 }
 
+static inline int aac_aif_data(struct aac_aifcmd *aifcmd, uint32_t index)
+{
+	return le32_to_cpu(((__le32 *)aifcmd->data)[index]);
+}
+
+
+static void aac_handle_aif_bu(struct aac_dev *dev, struct aac_aifcmd *aifcmd)
+{
+	switch (aac_aif_data(aifcmd, 1)) {
+	case AifBuCacheDataLoss:
+		if (aac_aif_data(aifcmd, 2))
+			dev_info(&dev->pdev->dev, "Backup unit had cache data loss - [%d]\n",
+			aac_aif_data(aifcmd, 2));
+		else
+			dev_info(&dev->pdev->dev, "Backup Unit had cache data loss\n");
+		break;
+	case AifBuCacheDataRecover:
+		if (aac_aif_data(aifcmd, 2))
+			dev_info(&dev->pdev->dev, "DDR cache data recovered successfully - [%d]\n",
+			aac_aif_data(aifcmd, 2));
+		else
+			dev_info(&dev->pdev->dev, "DDR cache data recovered successfully\n");
+		break;
+	}
+}
 
 /**
  *	aac_handle_aif		-	Handle a message from the firmware
@@ -1154,6 +1179,8 @@ static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
 				  ADD : DELETE;
 				break;
 			}
+			case AifBuManagerEvent:
+				aac_handle_aif_bu(dev, aifcmd);
 			break;
 		}
 
@@ -1996,6 +2023,10 @@ int aac_command_thread(void *data)
 		if (difference <= 0)
 			difference = 1;
 		set_current_state(TASK_INTERRUPTIBLE);
+
+		if (kthread_should_stop())
+			break;
+
 		schedule_timeout(difference);
 
 		if (kthread_should_stop())
@@ -2012,30 +2043,22 @@ int aac_acquire_irq(struct aac_dev *dev)
 	int i;
 	int j;
 	int ret = 0;
-	int cpu;
 
-	cpu = cpumask_first(cpu_online_mask);
 	if (!dev->sync_mode && dev->msi_enabled && dev->max_msix > 1) {
 		for (i = 0; i < dev->max_msix; i++) {
 			dev->aac_msix[i].vector_no = i;
 			dev->aac_msix[i].dev = dev;
-			if (request_irq(dev->msixentry[i].vector,
+			if (request_irq(pci_irq_vector(dev->pdev, i),
 					dev->a_ops.adapter_intr,
 					0, "aacraid", &(dev->aac_msix[i]))) {
 				printk(KERN_ERR "%s%d: Failed to register IRQ for vector %d.\n",
 						dev->name, dev->id, i);
 				for (j = 0 ; j < i ; j++)
-					free_irq(dev->msixentry[j].vector,
+					free_irq(pci_irq_vector(dev->pdev, j),
 						 &(dev->aac_msix[j]));
 				pci_disable_msix(dev->pdev);
 				ret = -1;
 			}
-			if (irq_set_affinity_hint(dev->msixentry[i].vector,
-							get_cpu_mask(cpu))) {
-				printk(KERN_ERR "%s%d: Failed to set IRQ affinity for cpu %d\n",
-					    dev->name, dev->id, cpu);
-			}
-			cpu = cpumask_next(cpu, cpu_online_mask);
 		}
 	} else {
 		dev->aac_msix[0].vector_no = 0;
@@ -2065,16 +2088,9 @@ void aac_free_irq(struct aac_dev *dev)
 	    dev->pdev->device == PMC_DEVICE_S8 ||
 	    dev->pdev->device == PMC_DEVICE_S9) {
 		if (dev->max_msix > 1) {
-			for (i = 0; i < dev->max_msix; i++) {
-				if (irq_set_affinity_hint(
-					dev->msixentry[i].vector, NULL)) {
-					printk(KERN_ERR "%s%d: Failed to reset IRQ affinity for cpu %d\n",
-					    dev->name, dev->id, cpu);
-				}
-				cpu = cpumask_next(cpu, cpu_online_mask);
-				free_irq(dev->msixentry[i].vector,
-						&(dev->aac_msix[i]));
-			}
+			for (i = 0; i < dev->max_msix; i++)
+				free_irq(pci_irq_vector(dev->pdev, i),
+					 &(dev->aac_msix[i]));
 		} else {
 			free_irq(dev->pdev->irq, &(dev->aac_msix[0]));
 		}

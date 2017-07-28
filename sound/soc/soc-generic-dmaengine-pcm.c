@@ -163,31 +163,42 @@ static int dmaengine_pcm_set_runtime_hwparams(struct snd_pcm_substream *substrea
 	}
 
 	/*
-	 * Prepare formats mask for valid/allowed sample types. If the dma does
-	 * not have support for the given physical word size, it needs to be
-	 * masked out so user space can not use the format which produces
-	 * corrupted audio.
-	 * In case the dma driver does not implement the slave_caps the default
-	 * assumption is that it supports 1, 2 and 4 bytes widths.
+	 * If SND_DMAENGINE_PCM_DAI_FLAG_PACK is set keep
+	 * hw.formats set to 0, meaning no restrictions are in place.
+	 * In this case it's the responsibility of the DAI driver to
+	 * provide the supported format information.
 	 */
-	for (i = 0; i <= SNDRV_PCM_FORMAT_LAST; i++) {
-		int bits = snd_pcm_format_physical_width(i);
+	if (!(dma_data->flags & SND_DMAENGINE_PCM_DAI_FLAG_PACK))
+		/*
+		 * Prepare formats mask for valid/allowed sample types. If the
+		 * dma does not have support for the given physical word size,
+		 * it needs to be masked out so user space can not use the
+		 * format which produces corrupted audio.
+		 * In case the dma driver does not implement the slave_caps the
+		 * default assumption is that it supports 1, 2 and 4 bytes
+		 * widths.
+		 */
+		for (i = 0; i <= SNDRV_PCM_FORMAT_LAST; i++) {
+			int bits = snd_pcm_format_physical_width(i);
 
-		/* Enable only samples with DMA supported physical widths */
-		switch (bits) {
-		case 8:
-		case 16:
-		case 24:
-		case 32:
-		case 64:
-			if (addr_widths & (1 << (bits / 8)))
-				hw.formats |= (1LL << i);
-			break;
-		default:
-			/* Unsupported types */
-			break;
+			/*
+			 * Enable only samples with DMA supported physical
+			 * widths
+			 */
+			switch (bits) {
+			case 8:
+			case 16:
+			case 24:
+			case 32:
+			case 64:
+				if (addr_widths & (1 << (bits / 8)))
+					hw.formats |= (1LL << i);
+				break;
+			default:
+				/* Unsupported types */
+				break;
+			}
 		}
-	}
 
 	return snd_soc_set_runtime_hwparams(substream, &hw);
 }
@@ -252,7 +263,6 @@ static int dmaengine_pcm_new(struct snd_soc_pcm_runtime *rtd)
 	struct dmaengine_pcm *pcm = soc_platform_to_pcm(rtd->platform);
 	const struct snd_dmaengine_pcm_config *config = pcm->config;
 	struct device *dev = rtd->platform->dev;
-	struct snd_dmaengine_dai_dma_data *dma_data;
 	struct snd_pcm_substream *substream;
 	size_t prealloc_buffer_size;
 	size_t max_buffer_size;
@@ -267,18 +277,10 @@ static int dmaengine_pcm_new(struct snd_soc_pcm_runtime *rtd)
 		max_buffer_size = SIZE_MAX;
 	}
 
-
 	for (i = SNDRV_PCM_STREAM_PLAYBACK; i <= SNDRV_PCM_STREAM_CAPTURE; i++) {
 		substream = rtd->pcm->streams[i].substream;
 		if (!substream)
 			continue;
-
-		dma_data = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
-
-		if (!pcm->chan[i] &&
-		    (pcm->flags & SND_DMAENGINE_PCM_FLAG_CUSTOM_CHANNEL_NAME))
-			pcm->chan[i] = dma_request_slave_channel(dev,
-				dma_data->chan_name);
 
 		if (!pcm->chan[i] && (pcm->flags & SND_DMAENGINE_PCM_FLAG_COMPAT)) {
 			pcm->chan[i] = dmaengine_pcm_compat_request_channel(rtd,
@@ -348,9 +350,7 @@ static int dmaengine_pcm_request_chan_of(struct dmaengine_pcm *pcm,
 	const char *name;
 	struct dma_chan *chan;
 
-	if ((pcm->flags & (SND_DMAENGINE_PCM_FLAG_NO_DT |
-			   SND_DMAENGINE_PCM_FLAG_CUSTOM_CHANNEL_NAME)) ||
-	    !dev->of_node)
+	if ((pcm->flags & SND_DMAENGINE_PCM_FLAG_NO_DT) || !dev->of_node)
 		return 0;
 
 	if (config && config->dma_dev) {

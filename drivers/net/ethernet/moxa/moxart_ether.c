@@ -376,7 +376,7 @@ static int moxart_mac_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 
 	priv->tx_head = TX_NEXT(tx_head);
 
-	ndev->trans_start = jiffies;
+	netif_trans_update(ndev);
 	ret = NETDEV_TX_OK;
 out_unlock:
 	spin_unlock_irq(&priv->txlock);
@@ -444,7 +444,6 @@ static struct net_device_ops moxart_netdev_ops = {
 	.ndo_set_rx_mode	= moxart_mac_set_rx_mode,
 	.ndo_set_mac_address	= moxart_set_mac_address,
 	.ndo_validate_addr	= eth_validate_addr,
-	.ndo_change_mtu		= eth_change_mtu,
 };
 
 static int moxart_mac_probe(struct platform_device *pdev)

@@ -519,6 +519,26 @@ static int atl1c_set_features(struct net_device *netdev,
 	return 0;
 }
 
+static void atl1c_set_max_mtu(struct net_device *netdev)
+{
+	struct atl1c_adapter *adapter = netdev_priv(netdev);
+	struct atl1c_hw *hw = &adapter->hw;
+
+	switch (hw->nic_type) {
+	/* These (GbE) devices support jumbo packets, max_mtu 6122 */
+	case athr_l1c:
+	case athr_l1d:
+	case athr_l1d_2:
+		netdev->max_mtu = MAX_JUMBO_FRAME_SIZE -
+				  (ETH_HLEN + ETH_FCS_LEN + VLAN_HLEN);
+		break;
+	/* The 10/100 devices don't support jumbo packets, max_mtu 1500 */
+	default:
+		netdev->max_mtu = ETH_DATA_LEN;
+		break;
+	}
+}
+
 /**
  * atl1c_change_mtu - Change the Maximum Transfer Unit
  * @netdev: network interface device structure
@@ -529,22 +549,9 @@ static int atl1c_set_features(struct net_device *netdev,
 static int atl1c_change_mtu(struct net_device *netdev, int new_mtu)
 {
 	struct atl1c_adapter *adapter = netdev_priv(netdev);
-	struct atl1c_hw *hw = &adapter->hw;
-	int old_mtu   = netdev->mtu;
-	int max_frame = new_mtu + ETH_HLEN + ETH_FCS_LEN + VLAN_HLEN;
 
-	/* Fast Ethernet controller doesn't support jumbo packet */
-	if (((hw->nic_type == athr_l2c ||
-	      hw->nic_type == athr_l2c_b ||
-	      hw->nic_type == athr_l2c_b2) && new_mtu > ETH_DATA_LEN) ||
-	      max_frame < ETH_ZLEN + ETH_FCS_LEN ||
-	      max_frame > MAX_JUMBO_FRAME_SIZE) {
-		if (netif_msg_link(adapter))
-			dev_warn(&adapter->pdev->dev, "invalid MTU setting\n");
-		return -EINVAL;
-	}
 	/* set MTU */
-	if (old_mtu != new_mtu && netif_running(netdev)) {
+	if (netif_running(netdev)) {
 		while (test_and_set_bit(__AT_RESETTING, &adapter->flags))
 			msleep(1);
 		netdev->mtu = new_mtu;
@@ -821,7 +828,6 @@ static int atl1c_sw_init(struct atl1c_adapter *adapter)
 	atl1c_set_rxbufsize(adapter, adapter->netdev);
 	atomic_set(&adapter->irq_sem, 1);
 	spin_lock_init(&adapter->mdio_lock);
-	spin_lock_init(&adapter->tx_lock);
 	set_bit(__AT_DOWN, &adapter->flags);
 
 	return 0;
@@ -2206,7 +2212,6 @@ static netdev_tx_t atl1c_xmit_frame(struct sk_buff *skb,
 					  struct net_device *netdev)
 {
 	struct atl1c_adapter *adapter = netdev_priv(netdev);
-	unsigned long flags;
 	u16 tpd_req = 1;
 	struct atl1c_tpd_desc *tpd;
 	enum atl1c_trans_queue type = atl1c_trans_normal;
@@ -2217,16 +2222,10 @@ static netdev_tx_t atl1c_xmit_frame(struct sk_buff *skb,
 	}
 
 	tpd_req = atl1c_cal_tpd_req(skb);
-	if (!spin_trylock_irqsave(&adapter->tx_lock, flags)) {
-		if (netif_msg_pktdata(adapter))
-			dev_info(&adapter->pdev->dev, "tx locked\n");
-		return NETDEV_TX_LOCKED;
-	}
 
 	if (atl1c_tpd_avail(adapter, type) < tpd_req) {
 		/* no enough descriptor, just stop queue */
 		netif_stop_queue(netdev);
-		spin_unlock_irqrestore(&adapter->tx_lock, flags);
 		return NETDEV_TX_BUSY;
 	}
 
@@ -2234,7 +2233,6 @@ static netdev_tx_t atl1c_xmit_frame(struct sk_buff *skb,
 
 	/* do TSO and check sum */
 	if (atl1c_tso_csum(adapter, skb, &tpd, type) != 0) {
-		spin_unlock_irqrestore(&adapter->tx_lock, flags);
 		dev_kfree_skb_any(skb);
 		return NETDEV_TX_OK;
 	}
@@ -2257,12 +2255,10 @@ static netdev_tx_t atl1c_xmit_frame(struct sk_buff *skb,
 			   "tx-skb droppted due to dma error\n");
 		/* roll back tpd/buffer */
 		atl1c_tx_rollback(adapter, tpd, type);
-		spin_unlock_irqrestore(&adapter->tx_lock, flags);
 		dev_kfree_skb_any(skb);
 	} else {
 		netdev_sent_queue(adapter->netdev, skb->len);
 		atl1c_tx_queue(adapter, skb, tpd, type);
-		spin_unlock_irqrestore(&adapter->tx_lock, flags);
 	}
 
 	return NETDEV_TX_OK;
@@ -2522,6 +2518,7 @@ static int atl1c_init_netdev(struct net_device *netdev, struct pci_dev *pdev)
 
 	netdev->netdev_ops = &atl1c_netdev_ops;
 	netdev->watchdog_timeo = AT_TX_WATCHDOG;
+	netdev->min_mtu = ETH_ZLEN - (ETH_HLEN + VLAN_HLEN);
 	atl1c_set_ethtool_ops(netdev);
 
 	/* TODO: add when ready */
@@ -2624,6 +2621,9 @@ static int atl1c_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		dev_err(&pdev->dev, "net device private data init failed\n");
 		goto err_sw_init;
 	}
+	/* set max MTU */
+	atl1c_set_max_mtu(netdev);
+
 	atl1c_reset_pcie(&adapter->hw, ATL1C_PCIE_L0S_L1_DISABLE);
 
 	/* Init GPHY as early as possible due to power saving issue  */

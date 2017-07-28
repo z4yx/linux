@@ -1,3 +1,4 @@
+#include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +18,7 @@
 #include "strlist.h"
 #include <elf.h>
 
+#include "tsc.h"
 #include "session.h"
 #include "jit.h"
 #include "jitdump.h"
@@ -33,7 +35,12 @@ struct jit_buf_desc {
 	size_t           bufsize;
 	FILE             *in;
 	bool		 needs_bswap; /* handles cross-endianess */
+	bool		 use_arch_timestamp;
 	void		 *debug_data;
+	void		 *unwinding_data;
+	uint64_t	 unwinding_size;
+	uint64_t	 unwinding_mapped_size;
+	uint64_t         eh_frame_hdr_size;
 	size_t		 nr_debug_entries;
 	uint32_t         code_load_count;
 	u64		 bytes_written;
@@ -65,7 +72,10 @@ jit_emit_elf(char *filename,
 	     const void *code,
 	     int csize,
 	     void *debug,
-	     int nr_debug_entries)
+	     int nr_debug_entries,
+	     void *unwinding,
+	     uint32_t unwinding_header_size,
+	     uint32_t unwinding_size)
 {
 	int ret, fd;
 
@@ -78,7 +88,8 @@ jit_emit_elf(char *filename,
 		return -1;
 	}
 
-        ret = jit_write_elf(fd, code_addr, sym, (const void *)code, csize, debug, nr_debug_entries);
+	ret = jit_write_elf(fd, code_addr, sym, (const void *)code, csize, debug, nr_debug_entries,
+			    unwinding, unwinding_header_size, unwinding_size);
 
         close(fd);
 
@@ -106,7 +117,7 @@ jit_validate_events(struct perf_session *session)
 	/*
 	 * check that all events use CLOCK_MONOTONIC
 	 */
-	evlist__for_each(session->evlist, evsel) {
+	evlist__for_each_entry(session->evlist, evsel) {
 		if (evsel->attr.use_clockid == 0 || evsel->attr.clockid != CLOCK_MONOTONIC)
 			return -1;
 	}
@@ -158,13 +169,22 @@ jit_open(struct jit_buf_desc *jd, const char *name)
 		header.flags      = bswap_64(header.flags);
 	}
 
+	jd->use_arch_timestamp = header.flags & JITDUMP_FLAGS_ARCH_TIMESTAMP;
+
 	if (verbose > 2)
-		pr_debug("version=%u\nhdr.size=%u\nts=0x%llx\npid=%d\nelf_mach=%d\n",
+		pr_debug("version=%u\nhdr.size=%u\nts=0x%llx\npid=%d\nelf_mach=%d\nuse_arch_timestamp=%d\n",
 			header.version,
 			header.total_size,
 			(unsigned long long)header.timestamp,
 			header.pid,
-			header.elf_mach);
+			header.elf_mach,
+			jd->use_arch_timestamp);
+
+	if (header.version > JITHEADER_VERSION) {
+		pr_err("wrong jitdump version %u, expected " STR(JITHEADER_VERSION),
+			header.version);
+		goto error;
+	}
 
 	if (header.flags & JITDUMP_FLAGS_RESERVED) {
 		pr_err("jitdump file contains invalid or unsupported flags 0x%llx\n",
@@ -172,10 +192,15 @@ jit_open(struct jit_buf_desc *jd, const char *name)
 		goto error;
 	}
 
+	if (jd->use_arch_timestamp && !jd->session->time_conv.time_mult) {
+		pr_err("jitdump file uses arch timestamps but there is no timestamp conversion\n");
+		goto error;
+	}
+
 	/*
 	 * validate event is using the correct clockid
 	 */
-	if (jit_validate_events(jd->session)) {
+	if (!jd->use_arch_timestamp && jit_validate_events(jd->session)) {
 		pr_err("error, jitted code must be sampled with perf record -k 1\n");
 		goto error;
 	}
@@ -252,8 +277,7 @@ jit_get_next_entry(struct jit_buf_desc *jd)
 		return NULL;
 
 	if (id >= JIT_CODE_MAX) {
-		pr_warning("next_entry: unknown prefix %d, skipping\n", id);
-		return NULL;
+		pr_warning("next_entry: unknown record type %d, skipping\n", id);
 	}
 	if (bs > jd->bufsize) {
 		void *n;
@@ -285,6 +309,13 @@ jit_get_next_entry(struct jit_buf_desc *jd)
 			}
 		}
 		break;
+	case JIT_CODE_UNWINDING_INFO:
+		if (jd->needs_bswap) {
+			jr->unwinding.unwinding_size = bswap_64(jr->unwinding.unwinding_size);
+			jr->unwinding.eh_frame_hdr_size = bswap_64(jr->unwinding.eh_frame_hdr_size);
+			jr->unwinding.mapped_size = bswap_64(jr->unwinding.mapped_size);
+		}
+		break;
 	case JIT_CODE_CLOSE:
 		break;
 	case JIT_CODE_LOAD:
@@ -311,7 +342,8 @@ jit_get_next_entry(struct jit_buf_desc *jd)
 		break;
 	case JIT_CODE_MAX:
 	default:
-		return NULL;
+		/* skip unknown record (we have read them) */
+		break;
 	}
 	return jr;
 }
@@ -329,6 +361,23 @@ jit_inject_event(struct jit_buf_desc *jd, union perf_event *event)
 	return 0;
 }
 
+static uint64_t convert_timestamp(struct jit_buf_desc *jd, uint64_t timestamp)
+{
+	struct perf_tsc_conversion tc;
+
+	if (!jd->use_arch_timestamp)
+		return timestamp;
+
+	tc.time_shift = jd->session->time_conv.time_shift;
+	tc.time_mult  = jd->session->time_conv.time_mult;
+	tc.time_zero  = jd->session->time_conv.time_zero;
+
+	if (!tc.time_mult)
+		return 0;
+
+	return tsc_to_perf_time(timestamp, &tc);
+}
+
 static int jit_repipe_code_load(struct jit_buf_desc *jd, union jr_entry *jr)
 {
 	struct perf_sample sample;
@@ -342,7 +391,7 @@ static int jit_repipe_code_load(struct jit_buf_desc *jd, union jr_entry *jr)
 	u16 idr_size;
 	const char *sym;
 	uint32_t count;
-	int ret, csize;
+	int ret, csize, usize;
 	pid_t pid, tid;
 	struct {
 		u32 pid, tid;
@@ -352,6 +401,7 @@ static int jit_repipe_code_load(struct jit_buf_desc *jd, union jr_entry *jr)
 	pid   = jr->load.pid;
 	tid   = jr->load.tid;
 	csize = jr->load.code_size;
+	usize = jd->unwinding_mapped_size;
 	addr  = jr->load.code_addr;
 	sym   = (void *)((unsigned long)jr + sizeof(jr->load));
 	code  = (unsigned long)jr + jr->load.p.total_size - csize;
@@ -372,7 +422,8 @@ static int jit_repipe_code_load(struct jit_buf_desc *jd, union jr_entry *jr)
 
 	size = PERF_ALIGN(size, sizeof(u64));
 	uaddr = (uintptr_t)code;
-	ret = jit_emit_elf(filename, sym, addr, (const void *)uaddr, csize, jd->debug_data, jd->nr_debug_entries);
+	ret = jit_emit_elf(filename, sym, addr, (const void *)uaddr, csize, jd->debug_data, jd->nr_debug_entries,
+			   jd->unwinding_data, jd->eh_frame_hdr_size, jd->unwinding_size);
 
 	if (jd->debug_data && jd->nr_debug_entries) {
 		free(jd->debug_data);
@@ -380,12 +431,20 @@ static int jit_repipe_code_load(struct jit_buf_desc *jd, union jr_entry *jr)
 		jd->nr_debug_entries = 0;
 	}
 
+	if (jd->unwinding_data && jd->eh_frame_hdr_size) {
+		free(jd->unwinding_data);
+		jd->unwinding_data = NULL;
+		jd->eh_frame_hdr_size = 0;
+		jd->unwinding_mapped_size = 0;
+		jd->unwinding_size = 0;
+	}
+
 	if (ret) {
 		free(event);
 		return -1;
 	}
 	if (stat(filename, &st))
-		memset(&st, 0, sizeof(stat));
+		memset(&st, 0, sizeof(st));
 
 	event->mmap2.header.type = PERF_RECORD_MMAP2;
 	event->mmap2.header.misc = PERF_RECORD_MISC_USER;
@@ -394,7 +453,7 @@ static int jit_repipe_code_load(struct jit_buf_desc *jd, union jr_entry *jr)
 
 	event->mmap2.pgoff = GEN_ELF_TEXT_OFFSET;
 	event->mmap2.start = addr;
-	event->mmap2.len   = csize;
+	event->mmap2.len   = usize ? ALIGN_8(csize) + usize : csize;
 	event->mmap2.pid   = pid;
 	event->mmap2.tid   = tid;
 	event->mmap2.ino   = st.st_ino;
@@ -410,7 +469,7 @@ static int jit_repipe_code_load(struct jit_buf_desc *jd, union jr_entry *jr)
 		id->tid  = tid;
 	}
 	if (jd->sample_type & PERF_SAMPLE_TIME)
-		id->time = jr->load.p.timestamp;
+		id->time = convert_timestamp(jd, jr->load.p.timestamp);
 
 	/*
 	 * create pseudo sample to induce dso hit increment
@@ -445,6 +504,7 @@ static int jit_repipe_code_move(struct jit_buf_desc *jd, union jr_entry *jr)
 	char *filename;
 	size_t size;
 	struct stat st;
+	int usize;
 	u16 idr_size;
 	int ret;
 	pid_t pid, tid;
@@ -455,6 +515,7 @@ static int jit_repipe_code_move(struct jit_buf_desc *jd, union jr_entry *jr)
 
 	pid = jr->move.pid;
 	tid =  jr->move.tid;
+	usize = jd->unwinding_mapped_size;
 	idr_size = jd->machine->id_hdr_size;
 
 	/*
@@ -473,7 +534,7 @@ static int jit_repipe_code_move(struct jit_buf_desc *jd, union jr_entry *jr)
 	size++; /* for \0 */
 
 	if (stat(filename, &st))
-		memset(&st, 0, sizeof(stat));
+		memset(&st, 0, sizeof(st));
 
 	size = PERF_ALIGN(size, sizeof(u64));
 
@@ -483,7 +544,8 @@ static int jit_repipe_code_move(struct jit_buf_desc *jd, union jr_entry *jr)
 			(sizeof(event->mmap2.filename) - size) + idr_size);
 	event->mmap2.pgoff = GEN_ELF_TEXT_OFFSET;
 	event->mmap2.start = jr->move.new_code_addr;
-	event->mmap2.len   = jr->move.code_size;
+	event->mmap2.len   = usize ? ALIGN_8(jr->move.code_size) + usize
+				   : jr->move.code_size;
 	event->mmap2.pid   = pid;
 	event->mmap2.tid   = tid;
 	event->mmap2.ino   = st.st_ino;
@@ -499,7 +561,7 @@ static int jit_repipe_code_move(struct jit_buf_desc *jd, union jr_entry *jr)
 		id->tid  = tid;
 	}
 	if (jd->sample_type & PERF_SAMPLE_TIME)
-		id->time = jr->load.p.timestamp;
+		id->time = convert_timestamp(jd, jr->load.p.timestamp);
 
 	/*
 	 * create pseudo sample to induce dso hit increment
@@ -550,10 +612,35 @@ static int jit_repipe_debug_info(struct jit_buf_desc *jd, union jr_entry *jr)
 }
 
 static int
+jit_repipe_unwinding_info(struct jit_buf_desc *jd, union jr_entry *jr)
+{
+	void *unwinding_data;
+	uint32_t unwinding_data_size;
+
+	if (!(jd && jr))
+		return -1;
+
+	unwinding_data_size  = jr->prefix.total_size - sizeof(jr->unwinding);
+	unwinding_data = malloc(unwinding_data_size);
+	if (!unwinding_data)
+		return -1;
+
+	memcpy(unwinding_data, &jr->unwinding.unwinding_data,
+	       unwinding_data_size);
+
+	jd->eh_frame_hdr_size = jr->unwinding.eh_frame_hdr_size;
+	jd->unwinding_size = jr->unwinding.unwinding_size;
+	jd->unwinding_mapped_size = jr->unwinding.mapped_size;
+	jd->unwinding_data = unwinding_data;
+
+	return 0;
+}
+
+static int
 jit_process_dump(struct jit_buf_desc *jd)
 {
 	union jr_entry *jr;
-	int ret;
+	int ret = 0;
 
 	while ((jr = jit_get_next_entry(jd))) {
 		switch(jr->prefix.id) {
@@ -565,6 +652,9 @@ jit_process_dump(struct jit_buf_desc *jd)
 			break;
 		case JIT_CODE_DEBUG_INFO:
 			ret = jit_repipe_debug_info(jd, jr);
+			break;
+		case JIT_CODE_UNWINDING_INFO:
+			ret = jit_repipe_unwinding_info(jd, jr);
 			break;
 		default:
 			ret = 0;

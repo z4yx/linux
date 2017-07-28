@@ -14,8 +14,6 @@
 #include <linux/irqchip.h>
 #include <asm/irq.h>
 
-static int irq_prio;
-
 /*
  * Early Hardware specific Interrupt setup
  * -Called very early (start_kernel -> setup_arch -> setup_processor)
@@ -24,7 +22,7 @@ static int irq_prio;
  */
 void arc_init_IRQ(void)
 {
-	unsigned int tmp;
+	unsigned int tmp, irq_prio;
 
 	struct irq_build {
 #ifdef CONFIG_CPU_BIG_ENDIAN
@@ -67,33 +65,33 @@ void arc_init_IRQ(void)
 
 	irq_prio = irq_bcr.prio;	/* Encoded as N-1 for N levels */
 	pr_info("archs-intc\t: %d priority levels (default %d)%s\n",
-		irq_prio + 1, irq_prio,
+		irq_prio + 1, ARCV2_IRQ_DEF_PRIO,
 		irq_bcr.firq ? " FIRQ (not used)":"");
 
 	/* setup status32, don't enable intr yet as kernel doesn't want */
 	tmp = read_aux_reg(0xa);
-	tmp |= STATUS_AD_MASK | (irq_prio << 1);
+	tmp |= STATUS_AD_MASK | (ARCV2_IRQ_DEF_PRIO << 1);
 	tmp &= ~STATUS_IE_MASK;
-	asm volatile("flag %0	\n"::"r"(tmp));
+	asm volatile("kflag %0	\n"::"r"(tmp));
 }
 
 static void arcv2_irq_mask(struct irq_data *data)
 {
-	write_aux_reg(AUX_IRQ_SELECT, data->irq);
+	write_aux_reg(AUX_IRQ_SELECT, data->hwirq);
 	write_aux_reg(AUX_IRQ_ENABLE, 0);
 }
 
 static void arcv2_irq_unmask(struct irq_data *data)
 {
-	write_aux_reg(AUX_IRQ_SELECT, data->irq);
+	write_aux_reg(AUX_IRQ_SELECT, data->hwirq);
 	write_aux_reg(AUX_IRQ_ENABLE, 1);
 }
 
 void arcv2_irq_enable(struct irq_data *data)
 {
 	/* set default priority */
-	write_aux_reg(AUX_IRQ_SELECT, data->irq);
-	write_aux_reg(AUX_IRQ_PRIORITY, irq_prio);
+	write_aux_reg(AUX_IRQ_SELECT, data->hwirq);
+	write_aux_reg(AUX_IRQ_PRIORITY, ARCV2_IRQ_DEF_PRIO);
 
 	/*
 	 * hw auto enables (linux unmask) all by default
@@ -137,22 +135,29 @@ static const struct irq_domain_ops arcv2_irq_ops = {
 	.map = arcv2_irq_map,
 };
 
-static struct irq_domain *root_domain;
 
 static int __init
 init_onchip_IRQ(struct device_node *intc, struct device_node *parent)
 {
+	struct irq_domain *root_domain;
+
 	if (parent)
 		panic("DeviceTree incore intc not a root irq controller\n");
 
-	root_domain = irq_domain_add_legacy(intc, NR_CPU_IRQS, 0, 0,
-					    &arcv2_irq_ops, NULL);
-
+	root_domain = irq_domain_add_linear(intc, NR_CPU_IRQS, &arcv2_irq_ops, NULL);
 	if (!root_domain)
 		panic("root irq domain not avail\n");
 
-	/* with this we don't need to export root_domain */
+	/*
+	 * Needed for primary domain lookup to succeed
+	 * This is a primary irqchip, and can never have a parent
+	 */
 	irq_set_default_host(root_domain);
+
+#ifdef CONFIG_SMP
+	irq_create_mapping(root_domain, IPI_IRQ);
+#endif
+	irq_create_mapping(root_domain, SOFTIRQ_IRQ);
 
 	return 0;
 }

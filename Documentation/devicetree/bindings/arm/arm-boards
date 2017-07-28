@@ -93,6 +93,14 @@ Required nodes:
   a core-module with regs and the compatible strings
   "arm,core-module-versatile", "syscon"
 
+Optional nodes:
+
+- arm,versatile-ib2-syscon : if the Versatile has an IB2 interface
+  board mounted, this has a separate system controller that is
+  defined in this node.
+  Required properties:
+  compatible = "arm,versatile-ib2-syscon", "syscon"
+
 ARM RealView Boards
 -------------------
 The RealView boards cover tailored evaluation boards that are used to explore
@@ -140,11 +148,12 @@ Example:
 
 /dts-v1/;
 #include <dt-bindings/interrupt-controller/irq.h>
-#include "skeleton.dtsi"
 
 / {
 	model = "ARM RealView PB1176 with device tree";
 	compatible = "arm,realview-pb1176";
+	#address-cells = <1>;
+	#size-cells = <1>;
 
 	soc {
 		#address-cells = <1>;

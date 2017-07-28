@@ -15,6 +15,7 @@
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
+#include <linux/clk/renesas.h>
 #include <linux/device.h>
 #include <linux/init.h>
 #include <linux/mod_devicetable.h>
@@ -32,9 +33,9 @@
 #include "clk-div6.h"
 
 #ifdef DEBUG
-#define WARN_DEBUG(x)	do { } while (0)
-#else
 #define WARN_DEBUG(x)	WARN_ON(x)
+#else
+#define WARN_DEBUG(x)	do { } while (0)
 #endif
 
 
@@ -145,12 +146,12 @@ static int cpg_mstp_clock_endisable(struct clk_hw *hw, bool enable)
 		enable ? "ON" : "OFF");
 	spin_lock_irqsave(&priv->mstp_lock, flags);
 
-	value = clk_readl(priv->base + SMSTPCR(reg));
+	value = readl(priv->base + SMSTPCR(reg));
 	if (enable)
 		value &= ~bitmask;
 	else
 		value |= bitmask;
-	clk_writel(value, priv->base + SMSTPCR(reg));
+	writel(value, priv->base + SMSTPCR(reg));
 
 	spin_unlock_irqrestore(&priv->mstp_lock, flags);
 
@@ -158,8 +159,7 @@ static int cpg_mstp_clock_endisable(struct clk_hw *hw, bool enable)
 		return 0;
 
 	for (i = 1000; i > 0; --i) {
-		if (!(clk_readl(priv->base + MSTPSR(reg)) &
-		      bitmask))
+		if (!(readl(priv->base + MSTPSR(reg)) & bitmask))
 			break;
 		cpu_relax();
 	}
@@ -189,7 +189,7 @@ static int cpg_mstp_clock_is_enabled(struct clk_hw *hw)
 	struct cpg_mssr_priv *priv = clock->priv;
 	u32 value;
 
-	value = clk_readl(priv->base + MSTPSR(clock->index / 32));
+	value = readl(priv->base + MSTPSR(clock->index / 32));
 
 	return !(value & BIT(clock->index % 32));
 }
@@ -253,7 +253,7 @@ static void __init cpg_mssr_register_core_clk(const struct cpg_core_clk *core,
 {
 	struct clk *clk = NULL, *parent;
 	struct device *dev = priv->dev;
-	unsigned int id = core->id;
+	unsigned int id = core->id, div = core->div;
 	const char *parent_name;
 
 	WARN_DEBUG(id >= priv->num_core_clks);
@@ -266,6 +266,7 @@ static void __init cpg_mssr_register_core_clk(const struct cpg_core_clk *core,
 
 	case CLK_TYPE_FF:
 	case CLK_TYPE_DIV6P1:
+	case CLK_TYPE_DIV6_RO:
 		WARN_DEBUG(core->parent >= priv->num_core_clks);
 		parent = priv->clks[core->parent];
 		if (IS_ERR(parent)) {
@@ -274,13 +275,18 @@ static void __init cpg_mssr_register_core_clk(const struct cpg_core_clk *core,
 		}
 
 		parent_name = __clk_get_name(parent);
-		if (core->type == CLK_TYPE_FF) {
-			clk = clk_register_fixed_factor(NULL, core->name,
-							parent_name, 0,
-							core->mult, core->div);
-		} else {
+
+		if (core->type == CLK_TYPE_DIV6_RO)
+			/* Multiply with the DIV6 register value */
+			div *= (readl(priv->base + core->offset) & 0x3f) + 1;
+
+		if (core->type == CLK_TYPE_DIV6P1) {
 			clk = cpg_div6_register(core->name, 1, &parent_name,
 						priv->base + core->offset);
+		} else {
+			clk = clk_register_fixed_factor(NULL, core->name,
+							parent_name, 0,
+							core->mult, div);
 		}
 		break;
 
@@ -302,7 +308,7 @@ static void __init cpg_mssr_register_core_clk(const struct cpg_core_clk *core,
 	return;
 
 fail:
-	dev_err(dev, "Failed to register %s clock %s: %ld\n", "core,",
+	dev_err(dev, "Failed to register %s clock %s: %ld\n", "core",
 		core->name, PTR_ERR(clk));
 }
 
@@ -370,19 +376,19 @@ static void __init cpg_mssr_register_mod_clk(const struct mssr_mod_clk *mod,
 	return;
 
 fail:
-	dev_err(dev, "Failed to register %s clock %s: %ld\n", "module,",
+	dev_err(dev, "Failed to register %s clock %s: %ld\n", "module",
 		mod->name, PTR_ERR(clk));
 	kfree(clock);
 }
 
-
-#ifdef CONFIG_PM_GENERIC_DOMAINS_OF
 struct cpg_mssr_clk_domain {
 	struct generic_pm_domain genpd;
 	struct device_node *np;
 	unsigned int num_core_pm_clks;
 	unsigned int core_pm_clks[0];
 };
+
+static struct cpg_mssr_clk_domain *cpg_mssr_clk_domain;
 
 static bool cpg_mssr_is_pm_clk(const struct of_phandle_args *clkspec,
 			       struct cpg_mssr_clk_domain *pd)
@@ -407,16 +413,19 @@ static bool cpg_mssr_is_pm_clk(const struct of_phandle_args *clkspec,
 	}
 }
 
-static int cpg_mssr_attach_dev(struct generic_pm_domain *genpd,
-			       struct device *dev)
+int cpg_mssr_attach_dev(struct generic_pm_domain *unused, struct device *dev)
 {
-	struct cpg_mssr_clk_domain *pd =
-		container_of(genpd, struct cpg_mssr_clk_domain, genpd);
+	struct cpg_mssr_clk_domain *pd = cpg_mssr_clk_domain;
 	struct device_node *np = dev->of_node;
 	struct of_phandle_args clkspec;
 	struct clk *clk;
 	int i = 0;
 	int error;
+
+	if (!pd) {
+		dev_dbg(dev, "CPG/MSSR clock domain not yet available\n");
+		return -EPROBE_DEFER;
+	}
 
 	while (!of_parse_phandle_with_args(np, "clocks", "#clock-cells", i,
 					   &clkspec)) {
@@ -457,8 +466,7 @@ fail_put:
 	return error;
 }
 
-static void cpg_mssr_detach_dev(struct generic_pm_domain *genpd,
-				struct device *dev)
+void cpg_mssr_detach_dev(struct generic_pm_domain *unused, struct device *dev)
 {
 	if (!list_empty(&dev->power.subsys_data->clock_list))
 		pm_clk_destroy(dev);
@@ -484,28 +492,38 @@ static int __init cpg_mssr_add_clk_domain(struct device *dev,
 	genpd = &pd->genpd;
 	genpd->name = np->name;
 	genpd->flags = GENPD_FLAG_PM_CLK;
-	pm_genpd_init(genpd, &simple_qos_governor, false);
 	genpd->attach_dev = cpg_mssr_attach_dev;
 	genpd->detach_dev = cpg_mssr_detach_dev;
+	pm_genpd_init(genpd, &pm_domain_always_on_gov, false);
+	cpg_mssr_clk_domain = pd;
 
 	of_genpd_add_provider_simple(np, genpd);
 	return 0;
 }
-#else
-static inline int cpg_mssr_add_clk_domain(struct device *dev,
-					  const unsigned int *core_pm_clks,
-					  unsigned int num_core_pm_clks)
-{
-	return 0;
-}
-#endif /* !CONFIG_PM_GENERIC_DOMAINS_OF */
-
 
 static const struct of_device_id cpg_mssr_match[] = {
+#ifdef CONFIG_ARCH_R8A7743
+	{
+		.compatible = "renesas,r8a7743-cpg-mssr",
+		.data = &r8a7743_cpg_mssr_info,
+	},
+#endif
+#ifdef CONFIG_ARCH_R8A7745
+	{
+		.compatible = "renesas,r8a7745-cpg-mssr",
+		.data = &r8a7745_cpg_mssr_info,
+	},
+#endif
 #ifdef CONFIG_ARCH_R8A7795
 	{
 		.compatible = "renesas,r8a7795-cpg-mssr",
 		.data = &r8a7795_cpg_mssr_info,
+	},
+#endif
+#ifdef CONFIG_ARCH_R8A7796
+	{
+		.compatible = "renesas,r8a7796-cpg-mssr",
+		.data = &r8a7796_cpg_mssr_info,
 	},
 #endif
 	{ /* sentinel */ }

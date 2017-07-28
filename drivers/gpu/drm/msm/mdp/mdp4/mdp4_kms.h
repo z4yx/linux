@@ -37,21 +37,21 @@ struct mdp4_kms {
 
 	void __iomem *mmio;
 
-	struct regulator *dsi_pll_vdda;
-	struct regulator *dsi_pll_vddio;
 	struct regulator *vdd;
 
 	struct clk *clk;
 	struct clk *pclk;
 	struct clk *lut_clk;
 	struct clk *axi_clk;
-	struct msm_mmu *mmu;
+	struct msm_gem_address_space *aspace;
 
 	struct mdp_irq error_handler;
 
+	bool rpm_enabled;
+
 	/* empty/blank cursor bo to use when cursor is "disabled" */
 	struct drm_gem_object *blank_cursor_bo;
-	uint32_t blank_cursor_iova;
+	uint64_t blank_cursor_iova;
 };
 #define to_mdp4_kms(x) container_of(x, struct mdp4_kms, base)
 

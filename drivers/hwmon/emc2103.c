@@ -58,7 +58,7 @@ static const u8 REG_TEMP_MAX[4] = { 0x34, 0x30, 0x31, 0x32 };
  */
 static int apd = -1;
 module_param(apd, bint, 0);
-MODULE_PARM_DESC(init, "Set to zero to disable anti-parallel diode mode");
+MODULE_PARM_DESC(apd, "Set to zero to disable anti-parallel diode mode");
 
 struct temperature {
 	s8	degrees;
@@ -251,7 +251,7 @@ static ssize_t set_temp_min(struct device *dev, struct device_attribute *da,
 	if (result < 0)
 		return result;
 
-	val = clamp_val(DIV_ROUND_CLOSEST(val, 1000), -63, 127);
+	val = DIV_ROUND_CLOSEST(clamp_val(val, -63000, 127000), 1000);
 
 	mutex_lock(&data->update_lock);
 	data->temp_min[nr] = val;
@@ -273,7 +273,7 @@ static ssize_t set_temp_max(struct device *dev, struct device_attribute *da,
 	if (result < 0)
 		return result;
 
-	val = clamp_val(DIV_ROUND_CLOSEST(val, 1000), -63, 127);
+	val = DIV_ROUND_CLOSEST(clamp_val(val, -63000, 127000), 1000);
 
 	mutex_lock(&data->update_lock);
 	data->temp_max[nr] = val;

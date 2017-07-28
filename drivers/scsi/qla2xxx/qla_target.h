@@ -427,12 +427,32 @@ struct atio_from_isp {
 		struct {
 			uint8_t  entry_type;	/* Entry type. */
 			uint8_t  entry_count;	/* Entry count. */
-			uint8_t  data[58];
+			__le16	 attr_n_length;
+#define FCP_CMD_LENGTH_MASK 0x0fff
+#define FCP_CMD_LENGTH_MIN  0x38
+			uint8_t  data[56];
 			uint32_t signature;
 #define ATIO_PROCESSED 0xDEADDEAD		/* Signature */
 		} raw;
 	} u;
 } __packed;
+
+static inline int fcpcmd_is_corrupted(struct atio *atio)
+{
+	if (atio->entry_type == ATIO_TYPE7 &&
+	    (le16_to_cpu(atio->attr_n_length & FCP_CMD_LENGTH_MASK) <
+	    FCP_CMD_LENGTH_MIN))
+		return 1;
+	else
+		return 0;
+}
+
+/* adjust corrupted atio so we won't trip over the same entry again. */
+static inline void adjust_corrupted_atio(struct atio_from_isp *atio)
+{
+	atio->u.raw.attr_n_length = cpu_to_le16(FCP_CMD_LENGTH_MIN);
+	atio->u.isp24.fcp_cmnd.add_cdb_len = 0;
+}
 
 #define CTIO_TYPE7 0x12 /* Continue target I/O entry (for 24xx) */
 
@@ -738,7 +758,6 @@ struct qla_tgt_func_tmpl {
 	struct qla_tgt_sess *(*find_sess_by_s_id)(struct scsi_qla_host *,
 						const uint8_t *);
 	void (*clear_nacl_from_fcport_map)(struct qla_tgt_sess *);
-	void (*put_sess)(struct qla_tgt_sess *);
 	void (*shutdown_sess)(struct qla_tgt_sess *);
 };
 
@@ -930,6 +949,7 @@ struct qla_tgt_sess {
 	int generation;
 
 	struct se_session *se_sess;
+	struct kref sess_kref;
 	struct scsi_qla_host *vha;
 	struct qla_tgt *tgt;
 
@@ -1101,7 +1121,7 @@ extern int qlt_remove_target(struct qla_hw_data *, struct scsi_qla_host *);
 extern int qlt_lport_register(void *, u64, u64, u64,
 			int (*callback)(struct scsi_qla_host *, void *, u64, u64));
 extern void qlt_lport_deregister(struct scsi_qla_host *);
-extern void qlt_unreg_sess(struct qla_tgt_sess *);
+void qlt_put_sess(struct qla_tgt_sess *sess);
 extern void qlt_fc_port_added(struct scsi_qla_host *, fc_port_t *);
 extern void qlt_fc_port_deleted(struct scsi_qla_host *, fc_port_t *, int);
 extern int __init qlt_init(void);

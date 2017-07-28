@@ -15,11 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
+ * http://www.gnu.org/licenses/gpl-2.0.html
  *
  * GPL HEADER END
  */
@@ -61,7 +57,7 @@ static int libcfs_param_debug_mb_set(const char *val,
 				     const struct kernel_param *kp)
 {
 	int rc;
-	unsigned num;
+	unsigned int num;
 
 	rc = kstrtouint(val, 0, &num);
 	if (rc < 0)
@@ -232,130 +228,26 @@ int libcfs_panic_in_progress;
 static const char *
 libcfs_debug_subsys2str(int subsys)
 {
-	switch (1 << subsys) {
-	default:
+	static const char * const libcfs_debug_subsystems[] =
+		LIBCFS_DEBUG_SUBSYS_NAMES;
+
+	if (subsys >= ARRAY_SIZE(libcfs_debug_subsystems))
 		return NULL;
-	case S_UNDEFINED:
-		return "undefined";
-	case S_MDC:
-		return "mdc";
-	case S_MDS:
-		return "mds";
-	case S_OSC:
-		return "osc";
-	case S_OST:
-		return "ost";
-	case S_CLASS:
-		return "class";
-	case S_LOG:
-		return "log";
-	case S_LLITE:
-		return "llite";
-	case S_RPC:
-		return "rpc";
-	case S_LNET:
-		return "lnet";
-	case S_LND:
-		return "lnd";
-	case S_PINGER:
-		return "pinger";
-	case S_FILTER:
-		return "filter";
-	case S_ECHO:
-		return "echo";
-	case S_LDLM:
-		return "ldlm";
-	case S_LOV:
-		return "lov";
-	case S_LQUOTA:
-		return "lquota";
-	case S_OSD:
-		return "osd";
-	case S_LFSCK:
-		return "lfsck";
-	case S_LMV:
-		return "lmv";
-	case S_SEC:
-		return "sec";
-	case S_GSS:
-		return "gss";
-	case S_MGC:
-		return "mgc";
-	case S_MGS:
-		return "mgs";
-	case S_FID:
-		return "fid";
-	case S_FLD:
-		return "fld";
-	}
+
+	return libcfs_debug_subsystems[subsys];
 }
 
 /* libcfs_debug_token2mask() expects the returned string in lower-case */
 static const char *
 libcfs_debug_dbg2str(int debug)
 {
-	switch (1 << debug) {
-	default:
+	static const char * const libcfs_debug_masks[] =
+		LIBCFS_DEBUG_MASKS_NAMES;
+
+	if (debug >= ARRAY_SIZE(libcfs_debug_masks))
 		return NULL;
-	case D_TRACE:
-		return "trace";
-	case D_INODE:
-		return "inode";
-	case D_SUPER:
-		return "super";
-	case D_EXT2:
-		return "ext2";
-	case D_MALLOC:
-		return "malloc";
-	case D_CACHE:
-		return "cache";
-	case D_INFO:
-		return "info";
-	case D_IOCTL:
-		return "ioctl";
-	case D_NETERROR:
-		return "neterror";
-	case D_NET:
-		return "net";
-	case D_WARNING:
-		return "warning";
-	case D_BUFFS:
-		return "buffs";
-	case D_OTHER:
-		return "other";
-	case D_DENTRY:
-		return "dentry";
-	case D_NETTRACE:
-		return "nettrace";
-	case D_PAGE:
-		return "page";
-	case D_DLMTRACE:
-		return "dlmtrace";
-	case D_ERROR:
-		return "error";
-	case D_EMERG:
-		return "emerg";
-	case D_HA:
-		return "ha";
-	case D_RPCTRACE:
-		return "rpctrace";
-	case D_VFSTRACE:
-		return "vfstrace";
-	case D_READA:
-		return "reada";
-	case D_MMAP:
-		return "mmap";
-	case D_CONFIG:
-		return "config";
-	case D_CONSOLE:
-		return "console";
-	case D_QUOTA:
-		return "quota";
-	case D_SEC:
-		return "sec";
-	case D_LFSCK:
-		return "lfsck";
-	}
+
+	return libcfs_debug_masks[debug];
 }
 
 int
@@ -363,17 +255,17 @@ libcfs_debug_mask2str(char *str, int size, int mask, int is_subsys)
 {
 	const char *(*fn)(int bit) = is_subsys ? libcfs_debug_subsys2str :
 						 libcfs_debug_dbg2str;
-	int	   len = 0;
-	const char   *token;
-	int	   i;
+	int len = 0;
+	const char *token;
+	int i;
 
-	if (mask == 0) {			/* "0" */
+	if (!mask) {			/* "0" */
 		if (size > 0)
 			str[0] = '0';
 		len = 1;
 	} else {				/* space-separated tokens */
 		for (i = 0; i < 32; i++) {
-			if ((mask & (1 << i)) == 0)
+			if (!(mask & (1 << i)))
 				continue;
 
 			token = fn(i);
@@ -386,7 +278,7 @@ libcfs_debug_mask2str(char *str, int size, int mask, int is_subsys)
 				len++;
 			}
 
-			while (*token != 0) {
+			while (*token) {
 				if (len < size)
 					str[len] = *token;
 				token++;
@@ -409,10 +301,10 @@ libcfs_debug_str2mask(int *mask, const char *str, int is_subsys)
 {
 	const char *(*fn)(int bit) = is_subsys ? libcfs_debug_subsys2str :
 						 libcfs_debug_dbg2str;
-	int	 m = 0;
-	int	 matched;
-	int	 n;
-	int	 t;
+	int m = 0;
+	int matched;
+	int n;
+	int t;
 
 	/* Allow a number for backwards compatibility */
 
@@ -423,7 +315,7 @@ libcfs_debug_str2mask(int *mask, const char *str, int is_subsys)
 	t = sscanf(str, "%i%n", &m, &matched);
 	if (t >= 1 && matched == n) {
 		/* don't print warning for lctl set_param debug=0 or -1 */
-		if (m != 0 && m != -1)
+		if (m && m != -1)
 			CWARN("You are trying to use a numerical value for the mask - this will be deprecated in a future release.\n");
 		*mask = m;
 		return 0;
@@ -438,15 +330,20 @@ libcfs_debug_str2mask(int *mask, const char *str, int is_subsys)
  */
 void libcfs_debug_dumplog_internal(void *arg)
 {
+	static time64_t last_dump_time;
+	time64_t current_time;
 	void *journal_info;
 
 	journal_info = current->journal_info;
 	current->journal_info = NULL;
+	current_time = ktime_get_real_seconds();
 
-	if (strncmp(libcfs_debug_file_path_arr, "NONE", 4) != 0) {
+	if (strncmp(libcfs_debug_file_path_arr, "NONE", 4) &&
+	    current_time > last_dump_time) {
+		last_dump_time = current_time;
 		snprintf(debug_file_name, sizeof(debug_file_name) - 1,
 			 "%s.%lld.%ld", libcfs_debug_file_path_arr,
-			 (s64)ktime_get_real_seconds(), (long_ptr_t)arg);
+			 (s64)current_time, (long_ptr_t)arg);
 		pr_alert("LustreError: dumping log to %s\n", debug_file_name);
 		cfs_tracefile_dump_all_pages(debug_file_name);
 		libcfs_run_debug_log_upcall(debug_file_name);
@@ -472,12 +369,12 @@ void libcfs_debug_dumplog(void)
 	 * get to schedule()
 	 */
 	init_waitqueue_entry(&wait, current);
-	set_current_state(TASK_INTERRUPTIBLE);
 	add_wait_queue(&debug_ctlwq, &wait);
 
 	dumper = kthread_run(libcfs_debug_dumplog_thread,
 			     (void *)(long)current_pid(),
 			     "libcfs_debug_dumper");
+	set_current_state(TASK_INTERRUPTIBLE);
 	if (IS_ERR(dumper))
 		pr_err("LustreError: cannot start log dump thread: %ld\n",
 		       PTR_ERR(dumper));
@@ -492,8 +389,8 @@ EXPORT_SYMBOL(libcfs_debug_dumplog);
 
 int libcfs_debug_init(unsigned long bufsize)
 {
-	int    rc = 0;
 	unsigned int max = libcfs_debug_mb;
+	int rc = 0;
 
 	init_waitqueue_head(&debug_ctlwq);
 
@@ -519,9 +416,9 @@ int libcfs_debug_init(unsigned long bufsize)
 		max = max / num_possible_cpus();
 		max <<= (20 - PAGE_SHIFT);
 	}
-	rc = cfs_tracefile_init(max);
 
-	if (rc == 0) {
+	rc = cfs_tracefile_init(max);
+	if (!rc) {
 		libcfs_register_panic_notifier();
 		libcfs_debug_mb = cfs_trace_get_debug_mb();
 	}

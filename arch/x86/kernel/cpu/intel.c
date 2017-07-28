@@ -5,7 +5,7 @@
 #include <linux/smp.h>
 #include <linux/sched.h>
 #include <linux/thread_info.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/uaccess.h>
 
 #include <asm/cpufeature.h>
@@ -13,6 +13,8 @@
 #include <asm/msr.h>
 #include <asm/bugs.h>
 #include <asm/cpu.h>
+#include <asm/intel-family.h>
+#include <asm/microcode_intel.h>
 
 #ifdef CONFIG_X86_64
 #include <linux/topology.h>
@@ -24,6 +26,41 @@
 #include <asm/mpspec.h>
 #include <asm/apic.h>
 #endif
+
+/*
+ * Just in case our CPU detection goes bad, or you have a weird system,
+ * allow a way to override the automatic disabling of MPX.
+ */
+static int forcempx;
+
+static int __init forcempx_setup(char *__unused)
+{
+	forcempx = 1;
+
+	return 1;
+}
+__setup("intel-skd-046-workaround=disable", forcempx_setup);
+
+void check_mpx_erratum(struct cpuinfo_x86 *c)
+{
+	if (forcempx)
+		return;
+	/*
+	 * Turn off the MPX feature on CPUs where SMEP is not
+	 * available or disabled.
+	 *
+	 * Works around Intel Erratum SKD046: "Branch Instructions
+	 * May Initialize MPX Bound Registers Incorrectly".
+	 *
+	 * This might falsely disable MPX on systems without
+	 * SMEP, like Atom processors without SMEP.  But there
+	 * is no such hardware known at the moment.
+	 */
+	if (cpu_has(c, X86_FEATURE_MPX) && !cpu_has(c, X86_FEATURE_SMEP)) {
+		setup_clear_cpu_cap(X86_FEATURE_MPX);
+		pr_warn("x86/mpx: Disabling MPX since SMEP not present\n");
+	}
+}
 
 static void early_init_intel(struct cpuinfo_x86 *c)
 {
@@ -42,14 +79,8 @@ static void early_init_intel(struct cpuinfo_x86 *c)
 		(c->x86 == 0x6 && c->x86_model >= 0x0e))
 		set_cpu_cap(c, X86_FEATURE_CONSTANT_TSC);
 
-	if (c->x86 >= 6 && !cpu_has(c, X86_FEATURE_IA64)) {
-		unsigned lower_word;
-
-		wrmsr(MSR_IA32_UCODE_REV, 0, 0);
-		/* Required by the SDM */
-		sync_core();
-		rdmsr(MSR_IA32_UCODE_REV, lower_word, c->microcode);
-	}
+	if (c->x86 >= 6 && !cpu_has(c, X86_FEATURE_IA64))
+		c->microcode = intel_get_microcode_revision();
 
 	/*
 	 * Atom erratum AAE44/AAF40/AAG38/AAH41:
@@ -152,9 +183,9 @@ static void early_init_intel(struct cpuinfo_x86 *c)
 	 *  the TLB when any changes are made to any of the page table entries.
 	 *  The operating system must reload CR3 to cause the TLB to be flushed"
 	 *
-	 * As a result cpu_has_pge() in arch/x86/include/asm/tlbflush.h should
-	 * be false so that __flush_tlb_all() causes CR3 insted of CR4.PGE
-	 * to be modified
+	 * As a result, boot_cpu_has(X86_FEATURE_PGE) in arch/x86/include/asm/tlbflush.h
+	 * should be false so that __flush_tlb_all() causes CR3 insted of CR4.PGE
+	 * to be modified.
 	 */
 	if (c->x86 == 5 && c->x86_model == 9) {
 		pr_info("Disabling PGE capability bit\n");
@@ -173,6 +204,8 @@ static void early_init_intel(struct cpuinfo_x86 *c)
 		if (edx & (1U << 28))
 			c->x86_coreid_bits = get_count_order((ebx >> 16) & 0xff);
 	}
+
+	check_mpx_erratum(c);
 }
 
 #ifdef CONFIG_X86_32
@@ -233,7 +266,7 @@ static void intel_workarounds(struct cpuinfo_x86 *c)
 	 * The Quark is also family 5, but does not have the same bug.
 	 */
 	clear_cpu_bug(c, X86_BUG_F00F);
-	if (!paravirt_enabled() && c->x86 == 5 && c->x86_model < 9) {
+	if (c->x86 == 5 && c->x86_model < 9) {
 		static int f00f_workaround_enabled;
 
 		set_cpu_bug(c, X86_BUG_F00F);
@@ -263,15 +296,14 @@ static void intel_workarounds(struct cpuinfo_x86 *c)
 	}
 
 	/*
-	 * P4 Xeon errata 037 workaround.
+	 * P4 Xeon erratum 037 workaround.
 	 * Hardware prefetcher may cause stale data to be loaded into the cache.
 	 */
 	if ((c->x86 == 15) && (c->x86_model == 1) && (c->x86_mask == 1)) {
 		if (msr_set_bit(MSR_IA32_MISC_ENABLE,
-				MSR_IA32_MISC_ENABLE_PREFETCH_DISABLE_BIT)
-		    > 0) {
+				MSR_IA32_MISC_ENABLE_PREFETCH_DISABLE_BIT) > 0) {
 			pr_info("CPU: C0 stepping P4 Xeon detected.\n");
-			pr_info("CPU: Disabling hardware prefetching (Errata 037)\n");
+			pr_info("CPU: Disabling hardware prefetching (Erratum 037)\n");
 		}
 	}
 
@@ -281,7 +313,7 @@ static void intel_workarounds(struct cpuinfo_x86 *c)
 	 * integrated APIC (see 11AP erratum in "Pentium Processor
 	 * Specification Update").
 	 */
-	if (cpu_has_apic && (c->x86<<8 | c->x86_model<<4) == 0x520 &&
+	if (boot_cpu_has(X86_FEATURE_APIC) && (c->x86<<8 | c->x86_model<<4) == 0x520 &&
 	    (c->x86_mask < 0x6 || c->x86_mask == 0xb))
 		set_cpu_bug(c, X86_BUG_11AP);
 
@@ -456,7 +488,7 @@ static void init_intel(struct cpuinfo_x86 *c)
 			set_cpu_cap(c, X86_FEATURE_ARCH_PERFMON);
 	}
 
-	if (cpu_has_xmm2)
+	if (cpu_has(c, X86_FEATURE_XMM2))
 		set_cpu_cap(c, X86_FEATURE_LFENCE_RDTSC);
 
 	if (boot_cpu_has(X86_FEATURE_DS)) {
@@ -468,9 +500,13 @@ static void init_intel(struct cpuinfo_x86 *c)
 			set_cpu_cap(c, X86_FEATURE_PEBS);
 	}
 
-	if (c->x86 == 6 && cpu_has_clflush &&
+	if (c->x86 == 6 && boot_cpu_has(X86_FEATURE_CLFLUSH) &&
 	    (c->x86_model == 29 || c->x86_model == 46 || c->x86_model == 47))
 		set_cpu_bug(c, X86_BUG_CLFLUSH_MONITOR);
+
+	if (c->x86 == 6 && boot_cpu_has(X86_FEATURE_MWAIT) &&
+		((c->x86_model == INTEL_FAM6_ATOM_GOLDMONT)))
+		set_cpu_bug(c, X86_BUG_MONITOR);
 
 #ifdef CONFIG_X86_64
 	if (c->x86 == 15)

@@ -50,14 +50,8 @@
 #include <stdio.h>
 
 #include "regression.h"
+#include "test.h"
 
-#ifdef __KERNEL__
-#define RADIX_TREE_MAP_SHIFT    (CONFIG_BASE_SMALL ? 4 : 6)
-#else
-#define RADIX_TREE_MAP_SHIFT    3       /* For more stressful testing */
-#endif
-
-#define RADIX_TREE_MAP_SIZE     (1UL << RADIX_TREE_MAP_SHIFT)
 #define PAGECACHE_TAG_DIRTY     0
 #define PAGECACHE_TAG_WRITEBACK 1
 #define PAGECACHE_TAG_TOWRITE   2
@@ -97,7 +91,7 @@ void regression2_test(void)
 	/* 1. */
 	start = 0;
 	end = max_slots - 2;
-	radix_tree_range_tag_if_tagged(&mt_tree, &start, end, 1,
+	tag_tagged_items(&mt_tree, NULL, start, end, 1,
 				PAGECACHE_TAG_DIRTY, PAGECACHE_TAG_TOWRITE);
 
 	/* 2. */

@@ -499,7 +499,7 @@ static void smc911x_hardware_send_pkt(struct net_device *dev)
 	/* DMA complete IRQ will free buffer and set jiffies */
 #else
 	SMC_PUSH_DATA(lp, buf, len);
-	dev->trans_start = jiffies;
+	netif_trans_update(dev);
 	dev_kfree_skb_irq(skb);
 #endif
 	if (!lp->tx_throttle) {
@@ -1189,7 +1189,7 @@ smc911x_tx_dma_irq(void *data)
 	DBG(SMC_DEBUG_TX | SMC_DEBUG_DMA, dev, "TX DMA irq handler\n");
 	BUG_ON(skb == NULL);
 	dma_unmap_single(NULL, tx_dmabuf, tx_dmalen, DMA_TO_DEVICE);
-	dev->trans_start = jiffies;
+	netif_trans_update(dev);
 	dev_kfree_skb_irq(skb);
 	lp->current_tx_skb = NULL;
 	if (lp->pending_tx_skb != NULL)
@@ -1283,7 +1283,7 @@ static void smc911x_timeout(struct net_device *dev)
 		schedule_work(&lp->phy_configure);
 
 	/* We can accept TX packets again */
-	dev->trans_start = jiffies; /* prevent tx timeout */
+	netif_trans_update(dev); /* prevent tx timeout */
 	netif_wake_queue(dev);
 }
 
@@ -1753,7 +1753,6 @@ static const struct net_device_ops smc911x_netdev_ops = {
 	.ndo_start_xmit		= smc911x_hard_start_xmit,
 	.ndo_tx_timeout		= smc911x_timeout,
 	.ndo_set_rx_mode	= smc911x_set_multicast_list,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= eth_mac_addr,
 #ifdef CONFIG_NET_POLL_CONTROLLER

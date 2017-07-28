@@ -1,6 +1,6 @@
 /*******************************************************************************
 *
-* Copyright (c) 2015 Intel Corporation.  All rights reserved.
+* Copyright (c) 2015-2016 Intel Corporation.  All rights reserved.
 *
 * This software is available to you under a choice of one of two
 * licenses.  You may choose to be licensed under the terms of the GNU
@@ -55,8 +55,6 @@
 #define SNDMARKER_SEQNMASK     0x000001FF
 
 #define I40IW_MAX_IETF_SIZE      32
-
-#define MPA_ZERO_PAD_LEN	4
 
 /* IETF RTR MSG Fields               */
 #define IETF_PEER_TO_PEER       0x8000
@@ -291,8 +289,6 @@ struct i40iw_cm_listener {
 	u8 loc_mac[ETH_ALEN];
 	u32 loc_addr[4];
 	u16 loc_port;
-	u32 map_loc_addr[4];
-	u16 map_loc_port;
 	struct iw_cm_id *cm_id;
 	atomic_t ref_count;
 	struct i40iw_device *iwdev;
@@ -301,6 +297,7 @@ struct i40iw_cm_listener {
 	enum i40iw_cm_listener_state listener_state;
 	u32 reused_node;
 	u8 user_pri;
+	u8 tos;
 	u16 vlan_id;
 	bool qhash_set;
 	bool ipv4;
@@ -317,8 +314,6 @@ struct i40iw_kmem_info {
 struct i40iw_cm_node {
 	u32 loc_addr[4], rem_addr[4];
 	u16 loc_port, rem_port;
-	u32 map_loc_addr[4], map_rem_addr[4];
-	u16 map_loc_port, map_rem_port;
 	u16 vlan_id;
 	enum i40iw_cm_node_state state;
 	u8 loc_mac[ETH_ALEN];
@@ -345,9 +340,11 @@ struct i40iw_cm_node {
 	int accept_pend;
 	struct list_head timer_entry;
 	struct list_head reset_entry;
+	struct list_head connected_entry;
 	atomic_t passive_state;
 	bool qhash_set;
 	u8 user_pri;
+	u8 tos;
 	bool ipv4;
 	bool snd_mark_en;
 	u16 lsmm_size;
@@ -370,13 +367,10 @@ struct i40iw_cm_info {
 	u16 rem_port;
 	u32 loc_addr[4];
 	u32 rem_addr[4];
-	u16 map_loc_port;
-	u16 map_rem_port;
-	u32 map_loc_addr[4];
-	u32 map_rem_addr[4];
 	u16 vlan_id;
 	int backlog;
-	u16 user_pri;
+	u8 user_pri;
+	u8 tos;
 	bool ipv4;
 };
 
@@ -453,4 +447,7 @@ int i40iw_arp_table(struct i40iw_device *iwdev,
 		    u8 *mac_addr,
 		    u32 action);
 
+void i40iw_if_notify(struct i40iw_device *iwdev, struct net_device *netdev,
+		     u32 *ipaddr, bool ipv4, bool ifup);
+void i40iw_cm_disconnect_all(struct i40iw_device *iwdev);
 #endif /* I40IW_CM_H */

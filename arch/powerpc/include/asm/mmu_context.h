@@ -18,31 +18,45 @@ extern void destroy_context(struct mm_struct *mm);
 #ifdef CONFIG_SPAPR_TCE_IOMMU
 struct mm_iommu_table_group_mem_t;
 
-extern bool mm_iommu_preregistered(void);
-extern long mm_iommu_get(unsigned long ua, unsigned long entries,
+extern int isolate_lru_page(struct page *page);	/* from internal.h */
+extern bool mm_iommu_preregistered(struct mm_struct *mm);
+extern long mm_iommu_get(struct mm_struct *mm,
+		unsigned long ua, unsigned long entries,
 		struct mm_iommu_table_group_mem_t **pmem);
-extern long mm_iommu_put(struct mm_iommu_table_group_mem_t *mem);
-extern void mm_iommu_init(mm_context_t *ctx);
-extern void mm_iommu_cleanup(mm_context_t *ctx);
-extern struct mm_iommu_table_group_mem_t *mm_iommu_lookup(unsigned long ua,
-		unsigned long size);
-extern struct mm_iommu_table_group_mem_t *mm_iommu_find(unsigned long ua,
-		unsigned long entries);
+extern long mm_iommu_put(struct mm_struct *mm,
+		struct mm_iommu_table_group_mem_t *mem);
+extern void mm_iommu_init(struct mm_struct *mm);
+extern void mm_iommu_cleanup(struct mm_struct *mm);
+extern struct mm_iommu_table_group_mem_t *mm_iommu_lookup(struct mm_struct *mm,
+		unsigned long ua, unsigned long size);
+extern struct mm_iommu_table_group_mem_t *mm_iommu_find(struct mm_struct *mm,
+		unsigned long ua, unsigned long entries);
 extern long mm_iommu_ua_to_hpa(struct mm_iommu_table_group_mem_t *mem,
 		unsigned long ua, unsigned long *hpa);
 extern long mm_iommu_mapped_inc(struct mm_iommu_table_group_mem_t *mem);
 extern void mm_iommu_mapped_dec(struct mm_iommu_table_group_mem_t *mem);
 #endif
-
-extern void switch_mmu_context(struct mm_struct *prev, struct mm_struct *next);
 extern void switch_slb(struct task_struct *tsk, struct mm_struct *mm);
 extern void set_context(unsigned long id, pgd_t *pgd);
 
 #ifdef CONFIG_PPC_BOOK3S_64
+extern void radix__switch_mmu_context(struct mm_struct *prev,
+				     struct mm_struct *next);
+static inline void switch_mmu_context(struct mm_struct *prev,
+				      struct mm_struct *next,
+				      struct task_struct *tsk)
+{
+	if (radix_enabled())
+		return radix__switch_mmu_context(prev, next);
+	return switch_slb(tsk, next);
+}
+
 extern int __init_new_context(void);
 extern void __destroy_context(int context_id);
 static inline void mmu_context_init(void) { }
 #else
+extern void switch_mmu_context(struct mm_struct *prev, struct mm_struct *next,
+			       struct task_struct *tsk);
 extern unsigned long __init_new_context(void);
 extern void __destroy_context(unsigned long context_id);
 extern void mmu_context_init(void);
@@ -60,7 +74,8 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 			     struct task_struct *tsk)
 {
 	/* Mark this context has been used on the new CPU */
-	cpumask_set_cpu(smp_processor_id(), mm_cpumask(next));
+	if (!cpumask_test_cpu(smp_processor_id(), mm_cpumask(next)))
+		cpumask_set_cpu(smp_processor_id(), mm_cpumask(next));
 
 	/* 32-bit keeps track of the current PGDIR in the thread struct */
 #ifdef CONFIG_PPC32
@@ -88,17 +103,11 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	if (cpu_has_feature(CPU_FTR_ALTIVEC))
 		asm volatile ("dssall");
 #endif /* CONFIG_ALTIVEC */
-
-	/* The actual HW switching method differs between the various
-	 * sub architectures.
+	/*
+	 * The actual HW switching method differs between the various
+	 * sub architectures. Out of line for now
 	 */
-#ifdef CONFIG_PPC_STD_MMU_64
-	switch_slb(tsk, next);
-#else
-	/* Out of line for now */
-	switch_mmu_context(prev, next);
-#endif
-
+	switch_mmu_context(prev, next, tsk);
 }
 
 #define deactivate_mm(tsk,mm)	do { } while (0)

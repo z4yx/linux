@@ -38,6 +38,9 @@
 
 #include <asm/irq.h>
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/mdio.h>
+
 int mdiobus_register_device(struct mdio_device *mdiodev)
 {
 	if (mdiodev->bus->mdio_map[mdiodev->addr])
@@ -333,7 +336,7 @@ int __mdiobus_register(struct mii_bus *bus, struct module *owner)
 			struct phy_device *phydev;
 
 			phydev = mdiobus_scan(bus, i);
-			if (IS_ERR(phydev)) {
+			if (IS_ERR(phydev) && (PTR_ERR(phydev) != -ENODEV)) {
 				err = PTR_ERR(phydev);
 				goto error;
 			}
@@ -419,7 +422,7 @@ struct phy_device *mdiobus_scan(struct mii_bus *bus, int addr)
 	int err;
 
 	phydev = get_phy_device(bus, addr, false);
-	if (IS_ERR(phydev) || phydev == NULL)
+	if (IS_ERR(phydev))
 		return phydev;
 
 	/*
@@ -431,7 +434,7 @@ struct phy_device *mdiobus_scan(struct mii_bus *bus, int addr)
 	err = phy_device_register(phydev);
 	if (err) {
 		phy_device_free(phydev);
-		return NULL;
+		return ERR_PTR(-ENODEV);
 	}
 
 	return phydev;
@@ -457,9 +460,11 @@ int mdiobus_read_nested(struct mii_bus *bus, int addr, u32 regnum)
 
 	BUG_ON(in_interrupt());
 
-	mutex_lock_nested(&bus->mdio_lock, SINGLE_DEPTH_NESTING);
+	mutex_lock_nested(&bus->mdio_lock, MDIO_MUTEX_NESTED);
 	retval = bus->read(bus, addr, regnum);
 	mutex_unlock(&bus->mdio_lock);
+
+	trace_mdio_access(bus, 1, addr, regnum, retval, retval);
 
 	return retval;
 }
@@ -485,6 +490,8 @@ int mdiobus_read(struct mii_bus *bus, int addr, u32 regnum)
 	retval = bus->read(bus, addr, regnum);
 	mutex_unlock(&bus->mdio_lock);
 
+	trace_mdio_access(bus, 1, addr, regnum, retval, retval);
+
 	return retval;
 }
 EXPORT_SYMBOL(mdiobus_read);
@@ -509,9 +516,11 @@ int mdiobus_write_nested(struct mii_bus *bus, int addr, u32 regnum, u16 val)
 
 	BUG_ON(in_interrupt());
 
-	mutex_lock_nested(&bus->mdio_lock, SINGLE_DEPTH_NESTING);
+	mutex_lock_nested(&bus->mdio_lock, MDIO_MUTEX_NESTED);
 	err = bus->write(bus, addr, regnum, val);
 	mutex_unlock(&bus->mdio_lock);
+
+	trace_mdio_access(bus, 0, addr, regnum, val, err);
 
 	return err;
 }
@@ -537,6 +546,8 @@ int mdiobus_write(struct mii_bus *bus, int addr, u32 regnum, u16 val)
 	mutex_lock(&bus->mdio_lock);
 	err = bus->write(bus, addr, regnum, val);
 	mutex_unlock(&bus->mdio_lock);
+
+	trace_mdio_access(bus, 0, addr, regnum, val, err);
 
 	return err;
 }

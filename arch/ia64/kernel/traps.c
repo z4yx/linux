@@ -21,7 +21,7 @@
 #include <asm/fpswa.h>
 #include <asm/intrinsics.h>
 #include <asm/processor.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/setup.h>
 
 fpswa_interface_t *fpswa_interface;
@@ -548,6 +548,7 @@ ia64_fault (unsigned long vector, unsigned long isr, unsigned long ifa,
 			return;
 		}
 		switch (vector) {
+		      default:
 		      case 29:
 			siginfo.si_code = TRAP_HWBKPT;
 #ifdef CONFIG_ITANIUM

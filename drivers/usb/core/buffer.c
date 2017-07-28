@@ -3,6 +3,9 @@
  *
  * This implementation plugs in through generic "usb_bus" level methods,
  * and should work with all USB controllers, regardless of bus type.
+ *
+ * Released under the GPLv2 only.
+ * SPDX-License-Identifier: GPL-2.0
  */
 
 #include <linux/module.h>
@@ -121,6 +124,9 @@ void *hcd_buffer_alloc(
 {
 	struct usb_hcd		*hcd = bus_to_hcd(bus);
 	int			i;
+
+	if (size == 0)
+		return NULL;
 
 	/* some USB hosts just use PIO */
 	if (!IS_ENABLED(CONFIG_HAS_DMA) ||

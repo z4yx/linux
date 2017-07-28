@@ -26,12 +26,27 @@ int item_tag_get(struct radix_tree_root *root, unsigned long index, int tag)
 
 int __item_insert(struct radix_tree_root *root, struct item *item)
 {
-	return radix_tree_insert(root, item->index, item);
+	return __radix_tree_insert(root, item->index, item->order, item);
 }
 
 int item_insert(struct radix_tree_root *root, unsigned long index)
 {
-	return __item_insert(root, item_create(index));
+	return __item_insert(root, item_create(index, 0));
+}
+
+int item_insert_order(struct radix_tree_root *root, unsigned long index,
+			unsigned order)
+{
+	return __item_insert(root, item_create(index, order));
+}
+
+void item_sanity(struct item *item, unsigned long index)
+{
+	unsigned long mask;
+	assert(!radix_tree_is_internal_node(item));
+	assert(item->order < BITS_PER_LONG);
+	mask = (1UL << item->order) - 1;
+	assert((item->index | mask) == (index | mask));
 }
 
 int item_delete(struct radix_tree_root *root, unsigned long index)
@@ -39,18 +54,19 @@ int item_delete(struct radix_tree_root *root, unsigned long index)
 	struct item *item = radix_tree_delete(root, index);
 
 	if (item) {
-		assert(item->index == index);
+		item_sanity(item, index);
 		free(item);
 		return 1;
 	}
 	return 0;
 }
 
-struct item *item_create(unsigned long index)
+struct item *item_create(unsigned long index, unsigned int order)
 {
 	struct item *ret = malloc(sizeof(*ret));
 
 	ret->index = index;
+	ret->order = order;
 	return ret;
 }
 
@@ -59,8 +75,8 @@ void item_check_present(struct radix_tree_root *root, unsigned long index)
 	struct item *item;
 
 	item = radix_tree_lookup(root, index);
-	assert(item != 0);
-	assert(item->index == index);
+	assert(item != NULL);
+	item_sanity(item, index);
 }
 
 struct item *item_lookup(struct radix_tree_root *root, unsigned long index)
@@ -73,7 +89,7 @@ void item_check_absent(struct radix_tree_root *root, unsigned long index)
 	struct item *item;
 
 	item = radix_tree_lookup(root, index);
-	assert(item == 0);
+	assert(item == NULL);
 }
 
 /*
@@ -135,14 +151,70 @@ void item_full_scan(struct radix_tree_root *root, unsigned long start,
 	assert(nfound == 0);
 }
 
+/* Use the same pattern as tag_pages_for_writeback() in mm/page-writeback.c */
+int tag_tagged_items(struct radix_tree_root *root, pthread_mutex_t *lock,
+			unsigned long start, unsigned long end, unsigned batch,
+			unsigned iftag, unsigned thentag)
+{
+	unsigned long tagged = 0;
+	struct radix_tree_iter iter;
+	void **slot;
+
+	if (batch == 0)
+		batch = 1;
+
+	if (lock)
+		pthread_mutex_lock(lock);
+	radix_tree_for_each_tagged(slot, root, &iter, start, iftag) {
+		if (iter.index > end)
+			break;
+		radix_tree_iter_tag_set(root, &iter, thentag);
+		tagged++;
+		if ((tagged % batch) != 0)
+			continue;
+		slot = radix_tree_iter_resume(slot, &iter);
+		if (lock) {
+			pthread_mutex_unlock(lock);
+			rcu_barrier();
+			pthread_mutex_lock(lock);
+		}
+	}
+	if (lock)
+		pthread_mutex_unlock(lock);
+
+	return tagged;
+}
+
+/* Use the same pattern as find_swap_entry() in mm/shmem.c */
+unsigned long find_item(struct radix_tree_root *root, void *item)
+{
+	struct radix_tree_iter iter;
+	void **slot;
+	unsigned long found = -1;
+	unsigned long checked = 0;
+
+	radix_tree_for_each_slot(slot, root, &iter, 0) {
+		if (*slot == item) {
+			found = iter.index;
+			break;
+		}
+		checked++;
+		if ((checked % 4) != 0)
+			continue;
+		slot = radix_tree_iter_resume(slot, &iter);
+	}
+
+	return found;
+}
+
 static int verify_node(struct radix_tree_node *slot, unsigned int tag,
-			unsigned int height, int tagged)
+			int tagged)
 {
 	int anyset = 0;
 	int i;
 	int j;
 
-	slot = indirect_to_ptr(slot);
+	slot = entry_to_node(slot);
 
 	/* Verify consistency at this level */
 	for (i = 0; i < RADIX_TREE_TAG_LONGS; i++) {
@@ -152,7 +224,8 @@ static int verify_node(struct radix_tree_node *slot, unsigned int tag,
 		}
 	}
 	if (tagged != anyset) {
-		printf("tag: %u, height %u, tagged: %d, anyset: %d\n", tag, height, tagged, anyset);
+		printf("tag: %u, shift %u, tagged: %d, anyset: %d\n",
+			tag, slot->shift, tagged, anyset);
 		for (j = 0; j < RADIX_TREE_MAX_TAGS; j++) {
 			printf("tag %d: ", j);
 			for (i = 0; i < RADIX_TREE_TAG_LONGS; i++)
@@ -164,10 +237,10 @@ static int verify_node(struct radix_tree_node *slot, unsigned int tag,
 	assert(tagged == anyset);
 
 	/* Go for next level */
-	if (height > 1) {
+	if (slot->shift > 0) {
 		for (i = 0; i < RADIX_TREE_MAP_SIZE; i++)
 			if (slot->slots[i])
-				if (verify_node(slot->slots[i], tag, height - 1,
+				if (verify_node(slot->slots[i], tag,
 					    !!test_bit(i, slot->tags[tag]))) {
 					printf("Failure at off %d\n", i);
 					for (j = 0; j < RADIX_TREE_MAX_TAGS; j++) {
@@ -184,15 +257,23 @@ static int verify_node(struct radix_tree_node *slot, unsigned int tag,
 
 void verify_tag_consistency(struct radix_tree_root *root, unsigned int tag)
 {
-	if (!root->height)
+	struct radix_tree_node *node = root->rnode;
+	if (!radix_tree_is_internal_node(node))
 		return;
-	verify_node(root->rnode, tag, root->height, !!root_tag_get(root, tag));
+	verify_node(node, tag, !!root_tag_get(root, tag));
 }
 
 void item_kill_tree(struct radix_tree_root *root)
 {
+	struct radix_tree_iter iter;
+	void **slot;
 	struct item *items[32];
 	int nfound;
+
+	radix_tree_for_each_slot(slot, root, &iter, 0) {
+		if (radix_tree_exceptional_entry(*slot))
+			radix_tree_delete(root, iter.index);
+	}
 
 	while ((nfound = radix_tree_gang_lookup(root, (void **)items, 0, 32))) {
 		int i;
@@ -211,9 +292,19 @@ void item_kill_tree(struct radix_tree_root *root)
 
 void tree_verify_min_height(struct radix_tree_root *root, int maxindex)
 {
-	assert(radix_tree_maxindex(root->height) >= maxindex);
-	if (root->height > 1)
-		assert(radix_tree_maxindex(root->height-1) < maxindex);
-	else if (root->height == 1)
-		assert(radix_tree_maxindex(root->height-1) <= maxindex);
+	unsigned shift;
+	struct radix_tree_node *node = root->rnode;
+	if (!radix_tree_is_internal_node(node)) {
+		assert(maxindex == 0);
+		return;
+	}
+
+	node = entry_to_node(node);
+	assert(maxindex <= node_maxindex(node));
+
+	shift = node->shift;
+	if (shift > 0)
+		assert(maxindex > shift_maxindex(shift - RADIX_TREE_MAP_SHIFT));
+	else
+		assert(maxindex > 0);
 }

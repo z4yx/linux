@@ -12,6 +12,7 @@
 static void
 __simple_checks(struct radix_tree_root *tree, unsigned long index, int tag)
 {
+	unsigned long first = 0;
 	int ret;
 
 	item_check_absent(tree, index);
@@ -21,6 +22,10 @@ __simple_checks(struct radix_tree_root *tree, unsigned long index, int tag)
 	assert(item_tag_get(tree, index, tag) == 0);
 	item_tag_set(tree, index, tag);
 	ret = item_tag_get(tree, index, tag);
+	assert(ret != 0);
+	ret = tag_tagged_items(tree, NULL, first, ~0UL, 10, tag, !tag);
+	assert(ret == 1);
+	ret = item_tag_get(tree, index, !tag);
 	assert(ret != 0);
 	ret = item_delete(tree, index);
 	assert(ret != 0);
@@ -46,6 +51,7 @@ void simple_checks(void)
 	verify_tag_consistency(&tree, 1);
 	printf("before item_kill_tree: %d allocated\n", nr_allocated);
 	item_kill_tree(&tree);
+	rcu_barrier();
 	printf("after item_kill_tree: %d allocated\n", nr_allocated);
 }
 
@@ -117,7 +123,7 @@ enum {
 	NODE_TAGGED = 2,
 };
 
-#define THRASH_SIZE		1000 * 1000
+#define THRASH_SIZE		(1000 * 1000)
 #define N 127
 #define BATCH	33
 
@@ -304,6 +310,7 @@ static void single_check(void)
 	struct item *items[BATCH];
 	RADIX_TREE(tree, GFP_KERNEL);
 	int ret;
+	unsigned long first = 0;
 
 	item_insert(&tree, 0);
 	item_tag_set(&tree, 0, 0);
@@ -313,6 +320,13 @@ static void single_check(void)
 	assert(ret == 0);
 	verify_tag_consistency(&tree, 0);
 	verify_tag_consistency(&tree, 1);
+	ret = tag_tagged_items(&tree, NULL, first, 10, 10, 0, 1);
+	assert(ret == 1);
+	ret = radix_tree_gang_lookup_tag(&tree, (void **)items, 0, BATCH, 1);
+	assert(ret == 1);
+	item_tag_clear(&tree, 0, 0);
+	ret = radix_tree_gang_lookup_tag(&tree, (void **)items, 0, BATCH, 0);
+	assert(ret == 0);
 	item_kill_tree(&tree);
 }
 
@@ -321,12 +335,16 @@ void tag_check(void)
 	single_check();
 	extend_checks();
 	contract_checks();
+	rcu_barrier();
 	printf("after extend_checks: %d allocated\n", nr_allocated);
 	__leak_check();
 	leak_check();
+	rcu_barrier();
 	printf("after leak_check: %d allocated\n", nr_allocated);
 	simple_checks();
+	rcu_barrier();
 	printf("after simple_checks: %d allocated\n", nr_allocated);
 	thrash_tags();
+	rcu_barrier();
 	printf("after thrash_tags: %d allocated\n", nr_allocated);
 }

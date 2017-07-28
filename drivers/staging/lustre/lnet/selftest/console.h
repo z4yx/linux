@@ -15,11 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
+ * http://www.gnu.org/licenses/gpl-2.0.html
  *
  * GPL HEADER END
  */
@@ -50,22 +46,25 @@
 #include "selftest.h"
 #include "conrpc.h"
 
-typedef struct lstcon_node {
+/* node descriptor */
+struct lstcon_node {
 	lnet_process_id_t nd_id;      /* id of the node */
 	int		  nd_ref;     /* reference count */
 	int		  nd_state;   /* state of the node */
 	int		  nd_timeout; /* session timeout */
 	unsigned long	  nd_stamp;   /* timestamp of last replied RPC */
 	struct lstcon_rpc nd_ping;    /* ping rpc */
-} lstcon_node_t; /* node descriptor */
+};
 
-typedef struct {
+/* node link descriptor */
+struct lstcon_ndlink {
 	struct list_head ndl_link;    /* chain on list */
 	struct list_head ndl_hlink;   /* chain on hash */
-	lstcon_node_t	 *ndl_node;   /* pointer to node */
-} lstcon_ndlink_t; /* node link descriptor */
+	struct lstcon_node	*ndl_node;	/* pointer to node */
+};
 
-typedef struct {
+/* (alias of nodes) group descriptor */
+struct lstcon_group {
 	struct list_head grp_link;		  /* chain on global group list
 						   */
 	int		 grp_ref;		  /* reference count */
@@ -76,39 +75,43 @@ typedef struct {
 	struct list_head grp_trans_list;	  /* transaction list */
 	struct list_head grp_ndl_list;		  /* nodes list */
 	struct list_head grp_ndl_hash[0];	  /* hash table for nodes */
-} lstcon_group_t; /* (alias of nodes) group descriptor */
+};
 
 #define LST_BATCH_IDLE	  0xB0	    /* idle batch */
 #define LST_BATCH_RUNNING 0xB1	    /* running batch */
 
-typedef struct lstcon_tsb_hdr {
+struct lstcon_tsb_hdr {
 	lst_bid_t	 tsb_id;	 /* batch ID */
 	int		 tsb_index;	 /* test index */
-} lstcon_tsb_hdr_t;
+};
 
-typedef struct {
-	lstcon_tsb_hdr_t bat_hdr;	  /* test_batch header */
+/* (tests ) batch descriptor */
+struct lstcon_batch {
+	struct lstcon_tsb_hdr	bat_hdr;	/* test_batch header */
 	struct list_head bat_link;	  /* chain on session's batches list */
 	int		 bat_ntest;	  /* # of test */
 	int		 bat_state;	  /* state of the batch */
 	int		 bat_arg;	  /* parameter for run|stop, timeout
-					   * for run, force for stop */
+					   * for run, force for stop
+					   */
 	char		 bat_name[LST_NAME_SIZE];/* name of batch */
 
-	struct list_head bat_test_list;   /* list head of tests (lstcon_test_t)
+	struct list_head bat_test_list;   /* list head of tests (struct lstcon_test)
 					   */
 	struct list_head bat_trans_list;  /* list head of transaction */
 	struct list_head bat_cli_list;	  /* list head of client nodes
-					   * (lstcon_node_t) */
+					   * (struct lstcon_node)
+					   */
 	struct list_head *bat_cli_hash;   /* hash table of client nodes */
 	struct list_head bat_srv_list;	  /* list head of server nodes */
 	struct list_head *bat_srv_hash;   /* hash table of server nodes */
-} lstcon_batch_t; /* (tests ) batch descriptor */
+};
 
-typedef struct lstcon_test {
-	lstcon_tsb_hdr_t tes_hdr;	 /* test batch header */
+/* a single test descriptor */
+struct lstcon_test {
+	struct lstcon_tsb_hdr	tes_hdr;	/* test batch header */
 	struct list_head tes_link;	 /* chain on batch's tests list */
-	lstcon_batch_t	 *tes_batch;	 /* pointer to batch */
+	struct lstcon_batch	*tes_batch;	 /* pointer to batch */
 
 	int		 tes_type;	 /* type of the test, i.e: bulk, ping */
 	int		 tes_stop_onerr; /* stop on error */
@@ -120,12 +123,12 @@ typedef struct lstcon_test {
 	int		 tes_cliidx;	 /* client index, used for RPC creating */
 
 	struct list_head tes_trans_list; /* transaction list */
-	lstcon_group_t	 *tes_src_grp;	 /* group run the test */
-	lstcon_group_t	 *tes_dst_grp;	 /* target group */
+	struct lstcon_group	*tes_src_grp;	/* group run the test */
+	struct lstcon_group	*tes_dst_grp;	/* target group */
 
 	int		 tes_paramlen;	 /* test parameter length */
 	char		 tes_param[0];	 /* test parameter */
-} lstcon_test_t; /* a single test descriptor */
+};
 
 #define LST_GLOBAL_HASHSIZE 503	     /* global nodes hash table size */
 #define LST_NODE_HASHSIZE   239	     /* node hash table (for batch or group) */
@@ -143,16 +146,17 @@ struct lstcon_session {
 	int		    ses_timeout;      /* timeout in seconds */
 	time64_t	    ses_laststamp;    /* last operation stamp (seconds)
 					       */
-	unsigned	    ses_features;     /* tests features of the session
+	unsigned int	    ses_features;     /* tests features of the session
 					       */
-	unsigned	    ses_feats_updated:1; /* features are synced with
-						  * remote test nodes */
-	unsigned	    ses_force:1;      /* force creating */
-	unsigned	    ses_shutdown:1;   /* session is shutting down */
-	unsigned	    ses_expired:1;    /* console is timedout */
+	unsigned int	    ses_feats_updated:1; /* features are synced with
+						  * remote test nodes
+						  */
+	unsigned int	    ses_force:1;      /* force creating */
+	unsigned int	    ses_shutdown:1;   /* session is shutting down */
+	unsigned int	    ses_expired:1;    /* console is timedout */
 	__u64		    ses_id_cookie;    /* batch id cookie */
 	char		    ses_name[LST_NAME_SIZE];/* session name */
-	lstcon_rpc_trans_t  *ses_ping;	      /* session pinger */
+	struct lstcon_rpc_trans	*ses_ping;		/* session pinger */
 	struct stt_timer	 ses_ping_timer;   /* timer for pinger */
 	lstcon_trans_stat_t ses_trans_stat;   /* transaction stats */
 
@@ -183,17 +187,18 @@ lstcon_id2hash(lnet_process_id_t id, struct list_head *hash)
 	return &hash[idx];
 }
 
+int lstcon_ioctl_entry(unsigned int cmd, struct libcfs_ioctl_hdr *hdr);
 int lstcon_console_init(void);
 int lstcon_console_fini(void);
 int lstcon_session_match(lst_sid_t sid);
-int lstcon_session_new(char *name, int key, unsigned version,
+int lstcon_session_new(char *name, int key, unsigned int version,
 		       int timeout, int flags, lst_sid_t __user *sid_up);
 int lstcon_session_info(lst_sid_t __user *sid_up, int __user *key,
 			unsigned __user *verp, lstcon_ndlist_ent_t __user *entp,
 			char __user *name_up, int len);
 int lstcon_session_end(void);
 int lstcon_session_debug(int timeout, struct list_head __user *result_up);
-int lstcon_session_feats_check(unsigned feats);
+int lstcon_session_feats_check(unsigned int feats);
 int lstcon_batch_debug(int timeout, char *name,
 		       int client, struct list_head __user *result_up);
 int lstcon_group_debug(int timeout, char *name,
@@ -205,7 +210,7 @@ int lstcon_group_del(char *name);
 int lstcon_group_clean(char *name, int args);
 int lstcon_group_refresh(char *name, struct list_head __user *result_up);
 int lstcon_nodes_add(char *name, int nnd, lnet_process_id_t __user *nds_up,
-		     unsigned *featp, struct list_head __user *result_up);
+		     unsigned int *featp, struct list_head __user *result_up);
 int lstcon_nodes_remove(char *name, int nnd, lnet_process_id_t __user *nds_up,
 			struct list_head __user *result_up);
 int lstcon_group_info(char *name, lstcon_ndlist_ent_t __user *gent_up,

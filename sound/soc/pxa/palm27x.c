@@ -27,7 +27,6 @@
 #include <mach/audio.h>
 #include <linux/platform_data/asoc-palm27x.h>
 
-#include "../codecs/wm9712.h"
 #include "pxa2xx-ac97.h"
 
 static struct snd_soc_jack hs_jack;
@@ -161,3 +160,4 @@ module_platform_driver(palm27x_wm9712_driver);
 MODULE_AUTHOR("Marek Vasut <marek.vasut@gmail.com>");
 MODULE_DESCRIPTION("ALSA SoC Palm T|X, T5 and LifeDrive");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS("platform:palm27x-asoc");

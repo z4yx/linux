@@ -231,7 +231,7 @@ acpi_tb_get_root_table_entry(u8 *table_entry, u32 table_entry_size)
 					   ACPI_FORMAT_UINT64(address64)));
 		}
 #endif
-		return ((acpi_physical_address) (address64));
+		return ((acpi_physical_address)(address64));
 	}
 }
 
@@ -252,7 +252,8 @@ acpi_tb_get_root_table_entry(u8 *table_entry, u32 table_entry_size)
  *
  ******************************************************************************/
 
-acpi_status __init acpi_tb_parse_root_table(acpi_physical_address rsdp_address)
+acpi_status ACPI_INIT_FUNCTION
+acpi_tb_parse_root_table(acpi_physical_address rsdp_address)
 {
 	struct acpi_table_rsdp *rsdp;
 	u32 table_entry_size;
@@ -287,12 +288,12 @@ acpi_status __init acpi_tb_parse_root_table(acpi_physical_address rsdp_address)
 		 * the XSDT if the revision is > 1 and the XSDT pointer is present,
 		 * as per the ACPI specification.
 		 */
-		address = (acpi_physical_address) rsdp->xsdt_physical_address;
+		address = (acpi_physical_address)rsdp->xsdt_physical_address;
 		table_entry_size = ACPI_XSDT_ENTRY_SIZE;
 	} else {
 		/* Root table is an RSDT (32-bit physical addresses) */
 
-		address = (acpi_physical_address) rsdp->rsdt_physical_address;
+		address = (acpi_physical_address)rsdp->rsdt_physical_address;
 		table_entry_size = ACPI_RSDT_ENTRY_SIZE;
 	}
 
@@ -383,27 +384,85 @@ next_table:
 
 /*******************************************************************************
  *
- * FUNCTION:    acpi_is_valid_signature
+ * FUNCTION:    acpi_tb_get_table
  *
- * PARAMETERS:  signature           - Sig string to be validated
+ * PARAMETERS:  table_desc          - Table descriptor
+ *              out_table           - Where the pointer to the table is returned
  *
- * RETURN:      TRUE if signature is has 4 valid ACPI characters
+ * RETURN:      Status and pointer to the requested table
  *
- * DESCRIPTION: Validate an ACPI table signature.
+ * DESCRIPTION: Increase a reference to a table descriptor and return the
+ *              validated table pointer.
+ *              If the table descriptor is an entry of the root table list,
+ *              this API must be invoked with ACPI_MTX_TABLES acquired.
  *
  ******************************************************************************/
 
-u8 acpi_is_valid_signature(char *signature)
+acpi_status
+acpi_tb_get_table(struct acpi_table_desc *table_desc,
+		  struct acpi_table_header **out_table)
 {
-	u32 i;
+	acpi_status status;
 
-	/* Validate each character in the signature */
+	ACPI_FUNCTION_TRACE(acpi_tb_get_table);
 
-	for (i = 0; i < ACPI_NAME_SIZE; i++) {
-		if (!acpi_ut_valid_acpi_char(signature[i], i)) {
-			return (FALSE);
+	if (table_desc->validation_count == 0) {
+
+		/* Table need to be "VALIDATED" */
+
+		status = acpi_tb_validate_table(table_desc);
+		if (ACPI_FAILURE(status)) {
+			return_ACPI_STATUS(status);
 		}
 	}
 
-	return (TRUE);
+	table_desc->validation_count++;
+	if (table_desc->validation_count == 0) {
+		ACPI_ERROR((AE_INFO,
+			    "Table %p, Validation count is zero after increment\n",
+			    table_desc));
+		table_desc->validation_count--;
+		return_ACPI_STATUS(AE_LIMIT);
+	}
+
+	*out_table = table_desc->pointer;
+	return_ACPI_STATUS(AE_OK);
+}
+
+/*******************************************************************************
+ *
+ * FUNCTION:    acpi_tb_put_table
+ *
+ * PARAMETERS:  table_desc          - Table descriptor
+ *
+ * RETURN:      None
+ *
+ * DESCRIPTION: Decrease a reference to a table descriptor and release the
+ *              validated table pointer if no references.
+ *              If the table descriptor is an entry of the root table list,
+ *              this API must be invoked with ACPI_MTX_TABLES acquired.
+ *
+ ******************************************************************************/
+
+void acpi_tb_put_table(struct acpi_table_desc *table_desc)
+{
+
+	ACPI_FUNCTION_TRACE(acpi_tb_put_table);
+
+	if (table_desc->validation_count == 0) {
+		ACPI_WARNING((AE_INFO,
+			      "Table %p, Validation count is zero before decrement\n",
+			      table_desc));
+		return_VOID;
+	}
+	table_desc->validation_count--;
+
+	if (table_desc->validation_count == 0) {
+
+		/* Table need to be "INVALIDATED" */
+
+		acpi_tb_invalidate_table(table_desc);
+	}
+
+	return_VOID;
 }

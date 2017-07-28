@@ -173,7 +173,7 @@ struct comedi_subdevice {
 
 	void *lock;
 	void *busy;
-	unsigned runflags;
+	unsigned int runflags;
 	spinlock_t spin_lock;	/* generic spin-lock for COMEDI and drivers */
 
 	unsigned int io_bits;
@@ -426,6 +426,18 @@ enum comedi_cb {
  * handler will be called with the COMEDI device structure's board_ptr member
  * pointing to the matched pointer to a board name within the driver's private
  * array of static, read-only board type information.
+ *
+ * The @detach handler has two roles.  If a COMEDI device was successfully
+ * configured by the @attach or @auto_attach handler, it is called when the
+ * device is being deconfigured (by the %COMEDI_DEVCONFIG ioctl, or due to
+ * unloading of the driver, or due to device removal).  It is also called when
+ * the @attach or @auto_attach handler returns an error.  Therefore, the
+ * @attach or @auto_attach handlers can defer clean-up on error until the
+ * @detach handler is called.  If the @attach or @auto_attach handlers free
+ * any resources themselves, they must prevent the @detach handler from
+ * freeing the same resources.  The @detach handler must not assume that all
+ * resources requested by the @attach or @auto_attach handler were
+ * successfully allocated.
  */
 struct comedi_driver {
 	/* private: */
@@ -566,7 +578,7 @@ struct comedi_device {
 
 void comedi_event(struct comedi_device *dev, struct comedi_subdevice *s);
 
-struct comedi_device *comedi_dev_get_from_minor(unsigned minor);
+struct comedi_device *comedi_dev_get_from_minor(unsigned int minor);
 int comedi_dev_put(struct comedi_device *dev);
 
 bool comedi_is_subdevice_running(struct comedi_subdevice *s);

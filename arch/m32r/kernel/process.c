@@ -29,7 +29,7 @@
 #include <linux/rcupdate.h>
 
 #include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/mmu_context.h>
 #include <asm/elf.h>
 #include <asm/m32r.h>
@@ -99,15 +99,6 @@ void show_regs(struct pt_regs * regs)
 #else
 #error unknown isa configuration
 #endif
-}
-
-/*
- * Free current thread data structures etc..
- */
-void exit_thread(void)
-{
-	/* Nothing to do. */
-	DPRINTK("pid = %d\n", current->pid);
 }
 
 void flush_thread(void)

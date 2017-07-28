@@ -1,4 +1,5 @@
 dts-dirs += al
+dts-dirs += allwinner
 dts-dirs += altera
 dts-dirs += amd
 dts-dirs += amlogic
@@ -18,6 +19,8 @@ dts-dirs += rockchip
 dts-dirs += socionext
 dts-dirs += sprd
 dts-dirs += xilinx
+dts-dirs += lg
+dts-dirs += zte
 
 subdir-y	:= $(dts-dirs)
 

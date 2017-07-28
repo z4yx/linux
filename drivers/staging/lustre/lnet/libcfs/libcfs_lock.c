@@ -49,11 +49,12 @@ EXPORT_SYMBOL(cfs_percpt_lock_free);
  * reason we always allocate cacheline-aligned memory block.
  */
 struct cfs_percpt_lock *
-cfs_percpt_lock_alloc(struct cfs_cpt_table *cptab)
+cfs_percpt_lock_create(struct cfs_cpt_table *cptab,
+		       struct lock_class_key *keys)
 {
-	struct cfs_percpt_lock	*pcl;
-	spinlock_t		*lock;
-	int			i;
+	struct cfs_percpt_lock *pcl;
+	spinlock_t *lock;
+	int i;
 
 	/* NB: cptab can be NULL, pcl will be for HW CPUs on that case */
 	LIBCFS_ALLOC(pcl, sizeof(*pcl));
@@ -67,12 +68,18 @@ cfs_percpt_lock_alloc(struct cfs_cpt_table *cptab)
 		return NULL;
 	}
 
-	cfs_percpt_for_each(lock, i, pcl->pcl_locks)
+	if (!keys)
+		CWARN("Cannot setup class key for percpt lock, you may see recursive locking warnings which are actually fake.\n");
+
+	cfs_percpt_for_each(lock, i, pcl->pcl_locks) {
 		spin_lock_init(lock);
+		if (keys)
+			lockdep_set_class(lock, &keys[i]);
+	}
 
 	return pcl;
 }
-EXPORT_SYMBOL(cfs_percpt_lock_alloc);
+EXPORT_SYMBOL(cfs_percpt_lock_create);
 
 /**
  * lock a CPU partition
@@ -87,8 +94,8 @@ void
 cfs_percpt_lock(struct cfs_percpt_lock *pcl, int index)
 	__acquires(pcl->pcl_locks)
 {
-	int	ncpt = cfs_cpt_number(pcl->pcl_cptab);
-	int	i;
+	int ncpt = cfs_cpt_number(pcl->pcl_cptab);
+	int i;
 
 	LASSERT(index >= CFS_PERCPT_LOCK_EX && index < ncpt);
 
@@ -107,7 +114,7 @@ cfs_percpt_lock(struct cfs_percpt_lock *pcl, int index)
 	/* exclusive lock request */
 	for (i = 0; i < ncpt; i++) {
 		spin_lock(pcl->pcl_locks[i]);
-		if (i == 0) {
+		if (!i) {
 			LASSERT(!pcl->pcl_locked);
 			/* nobody should take private lock after this
 			 * so I wouldn't starve for too long time
@@ -123,8 +130,8 @@ void
 cfs_percpt_unlock(struct cfs_percpt_lock *pcl, int index)
 	__releases(pcl->pcl_locks)
 {
-	int	ncpt = cfs_cpt_number(pcl->pcl_cptab);
-	int	i;
+	int ncpt = cfs_cpt_number(pcl->pcl_cptab);
+	int i;
 
 	index = ncpt == 1 ? 0 : index;
 
@@ -134,7 +141,7 @@ cfs_percpt_unlock(struct cfs_percpt_lock *pcl, int index)
 	}
 
 	for (i = ncpt - 1; i >= 0; i--) {
-		if (i == 0) {
+		if (!i) {
 			LASSERT(pcl->pcl_locked);
 			pcl->pcl_locked = 0;
 		}
@@ -142,44 +149,3 @@ cfs_percpt_unlock(struct cfs_percpt_lock *pcl, int index)
 	}
 }
 EXPORT_SYMBOL(cfs_percpt_unlock);
-
-/** free cpu-partition refcount */
-void
-cfs_percpt_atomic_free(atomic_t **refs)
-{
-	cfs_percpt_free(refs);
-}
-EXPORT_SYMBOL(cfs_percpt_atomic_free);
-
-/** allocate cpu-partition refcount with initial value @init_val */
-atomic_t **
-cfs_percpt_atomic_alloc(struct cfs_cpt_table *cptab, int init_val)
-{
-	atomic_t	**refs;
-	atomic_t	*ref;
-	int		i;
-
-	refs = cfs_percpt_alloc(cptab, sizeof(*ref));
-	if (!refs)
-		return NULL;
-
-	cfs_percpt_for_each(ref, i, refs)
-		atomic_set(ref, init_val);
-	return refs;
-}
-EXPORT_SYMBOL(cfs_percpt_atomic_alloc);
-
-/** return sum of cpu-partition refs */
-int
-cfs_percpt_atomic_summary(atomic_t **refs)
-{
-	atomic_t	*ref;
-	int		i;
-	int		val = 0;
-
-	cfs_percpt_for_each(ref, i, refs)
-		val += atomic_read(ref);
-
-	return val;
-}
-EXPORT_SYMBOL(cfs_percpt_atomic_summary);

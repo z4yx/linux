@@ -28,6 +28,7 @@
 #include <linux/types.h>
 
 struct net_device;
+struct net;
 
 enum batadv_hard_if_state {
 	BATADV_IF_NOT_IN_USE,
@@ -36,6 +37,20 @@ enum batadv_hard_if_state {
 	BATADV_IF_ACTIVE,
 	BATADV_IF_TO_BE_ACTIVATED,
 	BATADV_IF_I_WANT_YOU,
+};
+
+/**
+ * enum batadv_hard_if_bcast - broadcast avoidance options
+ * @BATADV_HARDIF_BCAST_OK: Do broadcast on according hard interface
+ * @BATADV_HARDIF_BCAST_NORECIPIENT: Broadcast not needed, there is no recipient
+ * @BATADV_HARDIF_BCAST_DUPFWD: There is just the neighbor we got it from
+ * @BATADV_HARDIF_BCAST_DUPORIG: There is just the originator
+ */
+enum batadv_hard_if_bcast {
+	BATADV_HARDIF_BCAST_OK = 0,
+	BATADV_HARDIF_BCAST_NORECIPIENT,
+	BATADV_HARDIF_BCAST_DUPFWD,
+	BATADV_HARDIF_BCAST_DUPORIG,
 };
 
 /**
@@ -50,18 +65,21 @@ enum batadv_hard_if_cleanup {
 
 extern struct notifier_block batadv_hard_if_notifier;
 
-bool batadv_is_wifi_netdev(struct net_device *net_device);
-bool batadv_is_wifi_iface(int ifindex);
+struct net_device *batadv_get_real_netdev(struct net_device *net_device);
+bool batadv_is_cfg80211_hardif(struct batadv_hard_iface *hard_iface);
+bool batadv_is_wifi_hardif(struct batadv_hard_iface *hard_iface);
 struct batadv_hard_iface*
 batadv_hardif_get_by_netdev(const struct net_device *net_dev);
 int batadv_hardif_enable_interface(struct batadv_hard_iface *hard_iface,
-				   const char *iface_name);
+				   struct net *net, const char *iface_name);
 void batadv_hardif_disable_interface(struct batadv_hard_iface *hard_iface,
 				     enum batadv_hard_if_cleanup autodel);
 void batadv_hardif_remove_interfaces(void);
 int batadv_hardif_min_mtu(struct net_device *soft_iface);
 void batadv_update_min_mtu(struct net_device *soft_iface);
 void batadv_hardif_release(struct kref *ref);
+int batadv_hardif_no_broadcast(struct batadv_hard_iface *if_outgoing,
+			       u8 *orig_addr, u8 *orig_neigh);
 
 /**
  * batadv_hardif_put - decrement the hard interface refcounter and possibly

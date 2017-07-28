@@ -11,6 +11,7 @@
 #include <linux/firmware.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/of.h>
 #include <linux/usb/phy.h>
 
 #include "xhci.h"
@@ -18,6 +19,8 @@
 #include "xhci-rcar.h"
 
 /*
+* - The V3 firmware is for r8a7796 (with good performance).
+* - The V2 firmware can be used on both r8a7795 (es1.x) and r8a7796.
 * - The V2 firmware is possible to use on R-Car Gen2. However, the V2 causes
 *   performance degradation. So, this driver continues to use the V1 if R-Car
 *   Gen2.
@@ -25,6 +28,7 @@
 */
 MODULE_FIRMWARE(XHCI_RCAR_FIRMWARE_NAME_V1);
 MODULE_FIRMWARE(XHCI_RCAR_FIRMWARE_NAME_V2);
+MODULE_FIRMWARE(XHCI_RCAR_FIRMWARE_NAME_V3);
 
 /*** Register Offset ***/
 #define RCAR_USB3_INT_ENA	0x224	/* Interrupt Enable */
@@ -76,6 +80,25 @@ static void xhci_rcar_start_gen2(struct usb_hcd *hcd)
 	writel(RCAR_USB3_TX_POL_VAL, hcd->regs + RCAR_USB3_TX_POL);
 }
 
+static int xhci_rcar_is_gen2(struct device *dev)
+{
+	struct device_node *node = dev->of_node;
+
+	return of_device_is_compatible(node, "renesas,xhci-r8a7790") ||
+		of_device_is_compatible(node, "renesas,xhci-r8a7791") ||
+		of_device_is_compatible(node, "renesas,xhci-r8a7793") ||
+		of_device_is_compatible(node, "renensas,rcar-gen2-xhci");
+}
+
+static int xhci_rcar_is_gen3(struct device *dev)
+{
+	struct device_node *node = dev->of_node;
+
+	return of_device_is_compatible(node, "renesas,xhci-r8a7795") ||
+		of_device_is_compatible(node, "renesas,xhci-r8a7796") ||
+		of_device_is_compatible(node, "renesas,rcar-gen3-xhci");
+}
+
 void xhci_rcar_start(struct usb_hcd *hcd)
 {
 	u32 temp;
@@ -85,7 +108,7 @@ void xhci_rcar_start(struct usb_hcd *hcd)
 		temp = readl(hcd->regs + RCAR_USB3_INT_ENA);
 		temp |= RCAR_USB3_INT_ENA_VAL;
 		writel(temp, hcd->regs + RCAR_USB3_INT_ENA);
-		if (xhci_plat_type_is(hcd, XHCI_PLAT_TYPE_RENESAS_RCAR_GEN2))
+		if (xhci_rcar_is_gen2(hcd->self.controller))
 			xhci_rcar_start_gen2(hcd);
 	}
 }
@@ -156,9 +179,22 @@ static int xhci_rcar_download_firmware(struct usb_hcd *hcd)
 /* This function needs to initialize a "phy" of usb before */
 int xhci_rcar_init_quirk(struct usb_hcd *hcd)
 {
+	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+
 	/* If hcd->regs is NULL, we don't just call the following function */
 	if (!hcd->regs)
 		return 0;
+
+	/*
+	 * On R-Car Gen2 and Gen3, the AC64 bit (bit 0) of HCCPARAMS1 is set
+	 * to 1. However, these SoCs don't support 64-bit address memory
+	 * pointers. So, this driver clears the AC64 bit of xhci->hcc_params
+	 * to call dma_set_coherent_mask(dev, DMA_BIT_MASK(32)) in
+	 * xhci_gen_setup().
+	 */
+	if (xhci_rcar_is_gen2(hcd->self.controller) ||
+			xhci_rcar_is_gen3(hcd->self.controller))
+		xhci->quirks |= XHCI_NO_64BIT_SUPPORT;
 
 	return xhci_rcar_download_firmware(hcd);
 }

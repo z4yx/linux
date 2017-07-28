@@ -15,11 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
+ * http://www.gnu.org/licenses/gpl-2.0.html
  *
  * GPL HEADER END
  */
@@ -43,6 +39,7 @@
 
 #include "../../include/linux/libcfs/libcfs.h"
 #include "../include/lustre_intent.h"
+#include "../include/lustre_swab.h"
 #include "../include/obd_class.h"
 #include "ldlm_internal.h"
 
@@ -67,17 +64,10 @@ static char *ldlm_typename[] = {
 	[LDLM_IBITS]	= "IBT",
 };
 
-static ldlm_policy_wire_to_local_t ldlm_policy_wire18_to_local[] = {
+static ldlm_policy_wire_to_local_t ldlm_policy_wire_to_local[] = {
 	[LDLM_PLAIN - LDLM_MIN_TYPE]	= ldlm_plain_policy_wire_to_local,
 	[LDLM_EXTENT - LDLM_MIN_TYPE]	= ldlm_extent_policy_wire_to_local,
-	[LDLM_FLOCK - LDLM_MIN_TYPE]	= ldlm_flock_policy_wire18_to_local,
-	[LDLM_IBITS - LDLM_MIN_TYPE]	= ldlm_ibits_policy_wire_to_local,
-};
-
-static ldlm_policy_wire_to_local_t ldlm_policy_wire21_to_local[] = {
-	[LDLM_PLAIN - LDLM_MIN_TYPE]	= ldlm_plain_policy_wire_to_local,
-	[LDLM_EXTENT - LDLM_MIN_TYPE]	= ldlm_extent_policy_wire_to_local,
-	[LDLM_FLOCK - LDLM_MIN_TYPE]	= ldlm_flock_policy_wire21_to_local,
+	[LDLM_FLOCK - LDLM_MIN_TYPE]	= ldlm_flock_policy_wire_to_local,
 	[LDLM_IBITS - LDLM_MIN_TYPE]	= ldlm_ibits_policy_wire_to_local,
 };
 
@@ -92,8 +82,8 @@ static ldlm_policy_local_to_wire_t ldlm_policy_local_to_wire[] = {
  * Converts lock policy from local format to on the wire lock_desc format
  */
 static void ldlm_convert_policy_to_wire(enum ldlm_type type,
-					const ldlm_policy_data_t *lpolicy,
-					ldlm_wire_policy_data_t *wpolicy)
+					const union ldlm_policy_data *lpolicy,
+					union ldlm_wire_policy_data *wpolicy)
 {
 	ldlm_policy_local_to_wire_t convert;
 
@@ -106,23 +96,17 @@ static void ldlm_convert_policy_to_wire(enum ldlm_type type,
  * Converts lock policy from on the wire lock_desc format to local format
  */
 void ldlm_convert_policy_to_local(struct obd_export *exp, enum ldlm_type type,
-				  const ldlm_wire_policy_data_t *wpolicy,
-				  ldlm_policy_data_t *lpolicy)
+				  const union ldlm_wire_policy_data *wpolicy,
+				  union ldlm_policy_data *lpolicy)
 {
 	ldlm_policy_wire_to_local_t convert;
-	int new_client;
 
-	/** some badness for 2.0.0 clients, but 2.0.0 isn't supported */
-	new_client = (exp_connect_flags(exp) & OBD_CONNECT_FULL20) != 0;
-	if (new_client)
-		convert = ldlm_policy_wire21_to_local[type - LDLM_MIN_TYPE];
-	else
-		convert = ldlm_policy_wire18_to_local[type - LDLM_MIN_TYPE];
+	convert = ldlm_policy_wire_to_local[type - LDLM_MIN_TYPE];
 
 	convert(wpolicy, lpolicy);
 }
 
-char *ldlm_it2str(int it)
+const char *ldlm_it2str(enum ldlm_intent_flags it)
 {
 	switch (it) {
 	case IT_OPEN:
@@ -144,7 +128,7 @@ char *ldlm_it2str(int it)
 	case IT_LAYOUT:
 		return "layout";
 	default:
-		CERROR("Unknown intent %d\n", it);
+		CERROR("Unknown intent 0x%08x\n", it);
 		return "UNKNOWN";
 	}
 }
@@ -185,7 +169,7 @@ void ldlm_lock_put(struct ldlm_lock *lock)
 			   "final lock_put on destroyed lock, freeing it.");
 
 		res = lock->l_resource;
-		LASSERT(lock->l_flags & LDLM_FL_DESTROYED);
+		LASSERT(ldlm_is_destroyed(lock));
 		LASSERT(list_empty(&lock->l_res_link));
 		LASSERT(list_empty(&lock->l_pending_chain));
 
@@ -229,15 +213,25 @@ int ldlm_lock_remove_from_lru_nolock(struct ldlm_lock *lock)
 
 /**
  * Removes LDLM lock \a lock from LRU. Obtains the LRU lock first.
+ *
+ * If \a last_use is non-zero, it will remove the lock from LRU only if
+ * it matches lock's l_last_used.
+ *
+ * \retval 0 if \a last_use is set, the lock is not in LRU list or \a last_use
+ *           doesn't match lock's l_last_used;
+ *           otherwise, the lock hasn't been in the LRU list.
+ * \retval 1 the lock was in LRU list and removed.
  */
-int ldlm_lock_remove_from_lru(struct ldlm_lock *lock)
+int ldlm_lock_remove_from_lru_check(struct ldlm_lock *lock, time_t last_use)
 {
 	struct ldlm_namespace *ns = ldlm_lock_to_ns(lock);
-	int rc;
+	int rc = 0;
 
 	spin_lock(&ns->ns_lock);
-	rc = ldlm_lock_remove_from_lru_nolock(lock);
+	if (last_use == 0 || last_use == lock->l_last_used)
+		rc = ldlm_lock_remove_from_lru_nolock(lock);
 	spin_unlock(&ns->ns_lock);
+
 	return rc;
 }
 
@@ -252,8 +246,7 @@ static void ldlm_lock_add_to_lru_nolock(struct ldlm_lock *lock)
 	LASSERT(list_empty(&lock->l_lru));
 	LASSERT(lock->l_resource->lr_type != LDLM_FLOCK);
 	list_add_tail(&lock->l_lru, &ns->ns_unused_list);
-	if (lock->l_flags & LDLM_FL_SKIPPED)
-		lock->l_flags &= ~LDLM_FL_SKIPPED;
+	ldlm_clear_skipped(lock);
 	LASSERT(ns->ns_nr_unused >= 0);
 	ns->ns_nr_unused++;
 }
@@ -318,11 +311,11 @@ static int ldlm_lock_destroy_internal(struct ldlm_lock *lock)
 		LBUG();
 	}
 
-	if (lock->l_flags & LDLM_FL_DESTROYED) {
+	if (ldlm_is_destroyed(lock)) {
 		LASSERT(list_empty(&lock->l_lru));
 		return 0;
 	}
-	lock->l_flags |= LDLM_FL_DESTROYED;
+	ldlm_set_destroyed(lock);
 
 	if (lock->l_export && lock->l_export->exp_lock_hash) {
 		/* NB: it's safe to call cfs_hash_del() even lock isn't
@@ -476,8 +469,8 @@ int ldlm_lock_change_resource(struct ldlm_namespace *ns, struct ldlm_lock *lock,
 	unlock_res_and_lock(lock);
 
 	newres = ldlm_resource_get(ns, NULL, new_resid, type, 1);
-	if (!newres)
-		return -ENOMEM;
+	if (IS_ERR(newres))
+		return PTR_ERR(newres);
 
 	lu_ref_add(&newres->lr_reference, "lock", lock);
 	/*
@@ -507,7 +500,6 @@ int ldlm_lock_change_resource(struct ldlm_namespace *ns, struct ldlm_lock *lock,
 
 	return 0;
 }
-EXPORT_SYMBOL(ldlm_lock_change_resource);
 
 /** \defgroup ldlm_handles LDLM HANDLES
  * Ways to get hold of locks without any addresses.
@@ -537,14 +529,14 @@ struct ldlm_lock *__ldlm_handle2lock(const struct lustre_handle *handle,
 
 	LASSERT(handle);
 
-	lock = class_handle2object(handle->cookie);
+	lock = class_handle2object(handle->cookie, NULL);
 	if (!lock)
 		return NULL;
 
 	/* It's unlikely but possible that someone marked the lock as
 	 * destroyed after we did handle2object on it
 	 */
-	if (flags == 0 && ((lock->l_flags & LDLM_FL_DESTROYED) == 0)) {
+	if (flags == 0 && !ldlm_is_destroyed(lock)) {
 		lu_ref_add(&lock->l_reference, "handle", current);
 		return lock;
 	}
@@ -554,21 +546,22 @@ struct ldlm_lock *__ldlm_handle2lock(const struct lustre_handle *handle,
 	LASSERT(lock->l_resource);
 
 	lu_ref_add_atomic(&lock->l_reference, "handle", current);
-	if (unlikely(lock->l_flags & LDLM_FL_DESTROYED)) {
+	if (unlikely(ldlm_is_destroyed(lock))) {
 		unlock_res_and_lock(lock);
 		CDEBUG(D_INFO, "lock already destroyed: lock %p\n", lock);
 		LDLM_LOCK_PUT(lock);
 		return NULL;
 	}
 
-	if (flags && (lock->l_flags & flags)) {
-		unlock_res_and_lock(lock);
-		LDLM_LOCK_PUT(lock);
-		return NULL;
-	}
+	if (flags) {
+		if (lock->l_flags & flags) {
+			unlock_res_and_lock(lock);
+			LDLM_LOCK_PUT(lock);
+			return NULL;
+		}
 
-	if (flags)
 		lock->l_flags |= flags;
+	}
 
 	unlock_res_and_lock(lock);
 	return lock;
@@ -589,7 +582,6 @@ void ldlm_lock2desc(struct ldlm_lock *lock, struct ldlm_lock_desc *desc)
 				    &lock->l_policy_data,
 				    &desc->l_policy_data);
 }
-EXPORT_SYMBOL(ldlm_lock2desc);
 
 /**
  * Add a lock to list of conflicting locks to send AST to.
@@ -599,14 +591,14 @@ EXPORT_SYMBOL(ldlm_lock2desc);
 static void ldlm_add_bl_work_item(struct ldlm_lock *lock, struct ldlm_lock *new,
 				  struct list_head *work_list)
 {
-	if ((lock->l_flags & LDLM_FL_AST_SENT) == 0) {
+	if (!ldlm_is_ast_sent(lock)) {
 		LDLM_DEBUG(lock, "lock incompatible; sending blocking AST.");
-		lock->l_flags |= LDLM_FL_AST_SENT;
+		ldlm_set_ast_sent(lock);
 		/* If the enqueuing client said so, tell the AST recipient to
 		 * discard dirty data, rather than writing back.
 		 */
-		if (new->l_flags & LDLM_FL_AST_DISCARD_DATA)
-			lock->l_flags |= LDLM_FL_DISCARD_DATA;
+		if (ldlm_is_ast_discard_data(new))
+			ldlm_set_discard_data(lock);
 		LASSERT(list_empty(&lock->l_bl_ast));
 		list_add(&lock->l_bl_ast, work_list);
 		LDLM_LOCK_GET(lock);
@@ -621,8 +613,8 @@ static void ldlm_add_bl_work_item(struct ldlm_lock *lock, struct ldlm_lock *new,
 static void ldlm_add_cp_work_item(struct ldlm_lock *lock,
 				  struct list_head *work_list)
 {
-	if ((lock->l_flags & LDLM_FL_CP_REQD) == 0) {
-		lock->l_flags |= LDLM_FL_CP_REQD;
+	if (!ldlm_is_cp_reqd(lock)) {
+		ldlm_set_cp_reqd(lock);
 		LDLM_DEBUG(lock, "lock granted; sending completion AST.");
 		LASSERT(list_empty(&lock->l_cp_ast));
 		list_add(&lock->l_cp_ast, work_list);
@@ -652,12 +644,12 @@ static void ldlm_add_ast_work_item(struct ldlm_lock *lock,
  * r/w reference type is determined by \a mode
  * Calls ldlm_lock_addref_internal.
  */
-void ldlm_lock_addref(struct lustre_handle *lockh, __u32 mode)
+void ldlm_lock_addref(const struct lustre_handle *lockh, enum ldlm_mode mode)
 {
 	struct ldlm_lock *lock;
 
 	lock = ldlm_handle2lock(lockh);
-	LASSERT(lock);
+	LASSERTF(lock, "Non-existing lock: %llx\n", lockh->cookie);
 	ldlm_lock_addref_internal(lock, mode);
 	LDLM_LOCK_PUT(lock);
 }
@@ -670,7 +662,8 @@ EXPORT_SYMBOL(ldlm_lock_addref);
  * Removes lock from LRU if it is there.
  * Assumes the LDLM lock is already locked.
  */
-void ldlm_lock_addref_internal_nolock(struct ldlm_lock *lock, __u32 mode)
+void ldlm_lock_addref_internal_nolock(struct ldlm_lock *lock,
+				      enum ldlm_mode mode)
 {
 	ldlm_lock_remove_from_lru(lock);
 	if (mode & (LCK_NL | LCK_CR | LCK_PR)) {
@@ -694,7 +687,7 @@ void ldlm_lock_addref_internal_nolock(struct ldlm_lock *lock, __u32 mode)
  *
  * \retval -EAGAIN lock is being canceled.
  */
-int ldlm_lock_addref_try(struct lustre_handle *lockh, __u32 mode)
+int ldlm_lock_addref_try(const struct lustre_handle *lockh, enum ldlm_mode mode)
 {
 	struct ldlm_lock *lock;
 	int	       result;
@@ -704,7 +697,7 @@ int ldlm_lock_addref_try(struct lustre_handle *lockh, __u32 mode)
 	if (lock) {
 		lock_res_and_lock(lock);
 		if (lock->l_readers != 0 || lock->l_writers != 0 ||
-		    !(lock->l_flags & LDLM_FL_CBPENDING)) {
+		    !ldlm_is_cbpending(lock)) {
 			ldlm_lock_addref_internal_nolock(lock, mode);
 			result = 0;
 		}
@@ -720,7 +713,7 @@ EXPORT_SYMBOL(ldlm_lock_addref_try);
  * Locks LDLM lock and calls ldlm_lock_addref_internal_nolock to do the work.
  * Only called for local locks.
  */
-void ldlm_lock_addref_internal(struct ldlm_lock *lock, __u32 mode)
+void ldlm_lock_addref_internal(struct ldlm_lock *lock, enum ldlm_mode mode)
 {
 	lock_res_and_lock(lock);
 	ldlm_lock_addref_internal_nolock(lock, mode);
@@ -734,7 +727,8 @@ void ldlm_lock_addref_internal(struct ldlm_lock *lock, __u32 mode)
  * Does NOT add lock to LRU if no r/w references left to accommodate flock locks
  * that cannot be placed in LRU.
  */
-void ldlm_lock_decref_internal_nolock(struct ldlm_lock *lock, __u32 mode)
+void ldlm_lock_decref_internal_nolock(struct ldlm_lock *lock,
+				      enum ldlm_mode mode)
 {
 	LDLM_DEBUG(lock, "ldlm_lock_decref(%s)", ldlm_lockname[mode]);
 	if (mode & (LCK_NL | LCK_CR | LCK_PR)) {
@@ -760,7 +754,7 @@ void ldlm_lock_decref_internal_nolock(struct ldlm_lock *lock, __u32 mode)
  * on the namespace.
  * For blocked LDLM locks if r/w count drops to zero, blocking_ast is called.
  */
-void ldlm_lock_decref_internal(struct ldlm_lock *lock, __u32 mode)
+void ldlm_lock_decref_internal(struct ldlm_lock *lock, enum ldlm_mode mode)
 {
 	struct ldlm_namespace *ns;
 
@@ -770,37 +764,40 @@ void ldlm_lock_decref_internal(struct ldlm_lock *lock, __u32 mode)
 
 	ldlm_lock_decref_internal_nolock(lock, mode);
 
-	if (lock->l_flags & LDLM_FL_LOCAL &&
+	if (ldlm_is_local(lock) &&
 	    !lock->l_readers && !lock->l_writers) {
 		/* If this is a local lock on a server namespace and this was
 		 * the last reference, cancel the lock.
 		 */
 		CDEBUG(D_INFO, "forcing cancel of local lock\n");
-		lock->l_flags |= LDLM_FL_CBPENDING;
+		ldlm_set_cbpending(lock);
 	}
 
 	if (!lock->l_readers && !lock->l_writers &&
-	    (lock->l_flags & LDLM_FL_CBPENDING)) {
+	    (ldlm_is_cbpending(lock) || lock->l_req_mode == LCK_GROUP)) {
 		/* If we received a blocked AST and this was the last reference,
 		 * run the callback.
+		 * Group locks are special:
+		 * They must not go in LRU, but they are not called back
+		 * like non-group locks, instead they are manually released.
+		 * They have an l_writers reference which they keep until
+		 * they are manually released, so we remove them when they have
+		 * no more reader or writer references. - LU-6368
 		 */
-
 		LDLM_DEBUG(lock, "final decref done on cbpending lock");
 
 		LDLM_LOCK_GET(lock); /* dropped by bl thread */
 		ldlm_lock_remove_from_lru(lock);
 		unlock_res_and_lock(lock);
 
-		if (lock->l_flags & LDLM_FL_FAIL_LOC)
+		if (ldlm_is_fail_loc(lock))
 			OBD_RACE(OBD_FAIL_LDLM_CP_BL_RACE);
 
-		if ((lock->l_flags & LDLM_FL_ATOMIC_CB) ||
+		if (ldlm_is_atomic_cb(lock) ||
 		    ldlm_bl_to_thread_lock(ns, NULL, lock) != 0)
 			ldlm_handle_bl_callback(ns, NULL, lock);
 	} else if (!lock->l_readers && !lock->l_writers &&
-		   !(lock->l_flags & LDLM_FL_NO_LRU) &&
-		   !(lock->l_flags & LDLM_FL_BL_AST)) {
-
+		   !ldlm_is_no_lru(lock) && !ldlm_is_bl_ast(lock)) {
 		LDLM_DEBUG(lock, "add lock into lru list");
 
 		/* If this is a client-side namespace and this was the last
@@ -809,7 +806,7 @@ void ldlm_lock_decref_internal(struct ldlm_lock *lock, __u32 mode)
 		ldlm_lock_add_to_lru(lock);
 		unlock_res_and_lock(lock);
 
-		if (lock->l_flags & LDLM_FL_FAIL_LOC)
+		if (ldlm_is_fail_loc(lock))
 			OBD_RACE(OBD_FAIL_LDLM_CP_BL_RACE);
 
 		/* Call ldlm_cancel_lru() only if EARLY_CANCEL and LRU RESIZE
@@ -828,7 +825,7 @@ void ldlm_lock_decref_internal(struct ldlm_lock *lock, __u32 mode)
 /**
  * Decrease reader/writer refcount for LDLM lock with handle \a lockh
  */
-void ldlm_lock_decref(struct lustre_handle *lockh, __u32 mode)
+void ldlm_lock_decref(const struct lustre_handle *lockh, enum ldlm_mode mode)
 {
 	struct ldlm_lock *lock = __ldlm_handle2lock(lockh, 0);
 
@@ -842,10 +839,9 @@ EXPORT_SYMBOL(ldlm_lock_decref);
  * Decrease reader/writer refcount for LDLM lock with handle
  * \a lockh and mark it for subsequent cancellation once r/w refcount
  * drops to zero instead of putting into LRU.
- *
- * Typical usage is for GROUP locks which we cannot allow to be cached.
  */
-void ldlm_lock_decref_and_cancel(struct lustre_handle *lockh, __u32 mode)
+void ldlm_lock_decref_and_cancel(const struct lustre_handle *lockh,
+				 enum ldlm_mode mode)
 {
 	struct ldlm_lock *lock = __ldlm_handle2lock(lockh, 0);
 
@@ -853,7 +849,7 @@ void ldlm_lock_decref_and_cancel(struct lustre_handle *lockh, __u32 mode)
 
 	LDLM_DEBUG(lock, "ldlm_lock_decref(%s)", ldlm_lockname[mode]);
 	lock_res_and_lock(lock);
-	lock->l_flags |= LDLM_FL_CBPENDING;
+	ldlm_set_cbpending(lock);
 	unlock_res_and_lock(lock);
 	ldlm_lock_decref_internal(lock, mode);
 	LDLM_LOCK_PUT(lock);
@@ -933,7 +929,7 @@ static void search_granted_lock(struct list_head *queue,
 				/* go to next policy group within mode group */
 				tmp = policy_end->l_res_link.next;
 				lock = list_entry(tmp, struct ldlm_lock,
-						      l_res_link);
+						  l_res_link);
 			}  /* loop over policy groups within the mode group */
 
 			/* insert point is last lock of the mode group,
@@ -971,7 +967,7 @@ static void ldlm_granted_list_add_lock(struct ldlm_lock *lock,
 	ldlm_resource_dump(D_INFO, res);
 	LDLM_DEBUG(lock, "About to add lock:");
 
-	if (lock->l_flags & LDLM_FL_DESTROYED) {
+	if (ldlm_is_destroyed(lock)) {
 		CDEBUG(D_OTHER, "Lock destroyed, not adding to resource\n");
 		return;
 	}
@@ -1024,103 +1020,200 @@ void ldlm_grant_lock(struct ldlm_lock *lock, struct list_head *work_list)
 	check_res_locked(res);
 
 	lock->l_granted_mode = lock->l_req_mode;
+
+	if (work_list && lock->l_completion_ast)
+		ldlm_add_ast_work_item(lock, NULL, work_list);
+
 	if (res->lr_type == LDLM_PLAIN || res->lr_type == LDLM_IBITS)
 		ldlm_grant_lock_with_skiplist(lock);
 	else if (res->lr_type == LDLM_EXTENT)
 		ldlm_extent_add_lock(res, lock);
-	else
+	else if (res->lr_type == LDLM_FLOCK) {
+		/*
+		 * We should not add locks to granted list in the following cases:
+		 * - this is an UNLOCK but not a real lock;
+		 * - this is a TEST lock;
+		 * - this is a F_CANCELLK lock (async flock has req_mode == 0)
+		 * - this is a deadlock (flock cannot be granted)
+		 */
+		if (!lock->l_req_mode || lock->l_req_mode == LCK_NL ||
+		    ldlm_is_test_lock(lock) || ldlm_is_flock_deadlock(lock))
+			return;
 		ldlm_resource_add_lock(res, &res->lr_granted, lock);
-
-	if (work_list && lock->l_completion_ast)
-		ldlm_add_ast_work_item(lock, NULL, work_list);
+	} else
+		LBUG();
 
 	ldlm_pool_add(&ldlm_res_to_ns(res)->ns_pool, lock);
 }
 
 /**
- * Search for a lock with given properties in a queue.
- *
- * \retval a referenced lock or NULL.  See the flag descriptions below, in the
- * comment above ldlm_lock_match
+ * Describe the overlap between two locks.  itree_overlap_cb data.
  */
-static struct ldlm_lock *search_queue(struct list_head *queue,
-				      enum ldlm_mode *mode,
-				      ldlm_policy_data_t *policy,
-				      struct ldlm_lock *old_lock,
-				      __u64 flags, int unref)
+struct lock_match_data {
+	struct ldlm_lock	*lmd_old;
+	struct ldlm_lock	*lmd_lock;
+	enum ldlm_mode		*lmd_mode;
+	union ldlm_policy_data	*lmd_policy;
+	__u64			 lmd_flags;
+	int			 lmd_unref;
+};
+
+/**
+ * Check if the given @lock meets the criteria for a match.
+ * A reference on the lock is taken if matched.
+ *
+ * \param lock	test-against this lock
+ * \param data	parameters
+ */
+static int lock_matches(struct ldlm_lock *lock, struct lock_match_data *data)
 {
-	struct ldlm_lock *lock;
-	struct list_head       *tmp;
+	union ldlm_policy_data *lpol = &lock->l_policy_data;
+	enum ldlm_mode match;
 
-	list_for_each(tmp, queue) {
-		enum ldlm_mode match;
+	if (lock == data->lmd_old)
+		return INTERVAL_ITER_STOP;
 
-		lock = list_entry(tmp, struct ldlm_lock, l_res_link);
+	/*
+	 * Check if this lock can be matched.
+	 * Used by LU-2919(exclusive open) for open lease lock
+	 */
+	if (ldlm_is_excl(lock))
+		return INTERVAL_ITER_CONT;
 
-		if (lock == old_lock)
-			break;
+	/*
+	 * llite sometimes wants to match locks that will be
+	 * canceled when their users drop, but we allow it to match
+	 * if it passes in CBPENDING and the lock still has users.
+	 * this is generally only going to be used by children
+	 * whose parents already hold a lock so forward progress
+	 * can still happen.
+	 */
+	if (ldlm_is_cbpending(lock) &&
+	    !(data->lmd_flags & LDLM_FL_CBPENDING))
+		return INTERVAL_ITER_CONT;
 
-		/* Check if this lock can be matched.
-		 * Used by LU-2919(exclusive open) for open lease lock
-		 */
-		if (ldlm_is_excl(lock))
-			continue;
+	if (!data->lmd_unref && ldlm_is_cbpending(lock) &&
+	    !lock->l_readers && !lock->l_writers)
+		return INTERVAL_ITER_CONT;
 
-		/* llite sometimes wants to match locks that will be
-		 * canceled when their users drop, but we allow it to match
-		 * if it passes in CBPENDING and the lock still has users.
-		 * this is generally only going to be used by children
-		 * whose parents already hold a lock so forward progress
-		 * can still happen.
-		 */
-		if (lock->l_flags & LDLM_FL_CBPENDING &&
-		    !(flags & LDLM_FL_CBPENDING))
-			continue;
-		if (!unref && lock->l_flags & LDLM_FL_CBPENDING &&
-		    lock->l_readers == 0 && lock->l_writers == 0)
-			continue;
+	if (!(lock->l_req_mode & *data->lmd_mode))
+		return INTERVAL_ITER_CONT;
+	match = lock->l_req_mode;
 
-		if (!(lock->l_req_mode & *mode))
-			continue;
-		match = lock->l_req_mode;
-
-		if (lock->l_resource->lr_type == LDLM_EXTENT &&
-		    (lock->l_policy_data.l_extent.start >
-		     policy->l_extent.start ||
-		     lock->l_policy_data.l_extent.end < policy->l_extent.end))
-			continue;
+	switch (lock->l_resource->lr_type) {
+	case LDLM_EXTENT:
+		if (lpol->l_extent.start > data->lmd_policy->l_extent.start ||
+		    lpol->l_extent.end < data->lmd_policy->l_extent.end)
+			return INTERVAL_ITER_CONT;
 
 		if (unlikely(match == LCK_GROUP) &&
-		    lock->l_resource->lr_type == LDLM_EXTENT &&
-		    lock->l_policy_data.l_extent.gid != policy->l_extent.gid)
-			continue;
-
-		/* We match if we have existing lock with same or wider set
+		    data->lmd_policy->l_extent.gid != LDLM_GID_ANY &&
+		    lpol->l_extent.gid != data->lmd_policy->l_extent.gid)
+			return INTERVAL_ITER_CONT;
+		break;
+	case LDLM_IBITS:
+		/*
+		 * We match if we have existing lock with same or wider set
 		 * of bits.
 		 */
-		if (lock->l_resource->lr_type == LDLM_IBITS &&
-		     ((lock->l_policy_data.l_inodebits.bits &
-		      policy->l_inodebits.bits) !=
-		      policy->l_inodebits.bits))
-			continue;
+		if ((lpol->l_inodebits.bits &
+		     data->lmd_policy->l_inodebits.bits) !=
+		    data->lmd_policy->l_inodebits.bits)
+			return INTERVAL_ITER_CONT;
+		break;
+	default:
+		break;
+	}
+	/*
+	 * We match if we have existing lock with same or wider set
+	 * of bits.
+	 */
+	if (!data->lmd_unref && LDLM_HAVE_MASK(lock, GONE))
+		return INTERVAL_ITER_CONT;
 
-		if (!unref && (lock->l_flags & LDLM_FL_GONE_MASK))
-			continue;
+	if ((data->lmd_flags & LDLM_FL_LOCAL_ONLY) &&
+	    !ldlm_is_local(lock))
+		return INTERVAL_ITER_CONT;
 
-		if ((flags & LDLM_FL_LOCAL_ONLY) &&
-		    !(lock->l_flags & LDLM_FL_LOCAL))
-			continue;
-
-		if (flags & LDLM_FL_TEST_LOCK) {
-			LDLM_LOCK_GET(lock);
-			ldlm_lock_touch_in_lru(lock);
-		} else {
-			ldlm_lock_addref_internal_nolock(lock, match);
-		}
-		*mode = match;
-		return lock;
+	if (data->lmd_flags & LDLM_FL_TEST_LOCK) {
+		LDLM_LOCK_GET(lock);
+		ldlm_lock_touch_in_lru(lock);
+	} else {
+		ldlm_lock_addref_internal_nolock(lock, match);
 	}
 
+	*data->lmd_mode = match;
+	data->lmd_lock = lock;
+
+	return INTERVAL_ITER_STOP;
+}
+
+static unsigned int itree_overlap_cb(struct interval_node *in, void *args)
+{
+	struct ldlm_interval *node = to_ldlm_interval(in);
+	struct lock_match_data *data = args;
+	struct ldlm_lock *lock;
+	int rc;
+
+	list_for_each_entry(lock, &node->li_group, l_sl_policy) {
+		rc = lock_matches(lock, data);
+		if (rc == INTERVAL_ITER_STOP)
+			return INTERVAL_ITER_STOP;
+	}
+	return INTERVAL_ITER_CONT;
+}
+
+/**
+ * Search for a lock with given parameters in interval trees.
+ *
+ * \param res	search for a lock in this resource
+ * \param data	parameters
+ *
+ * \retval	a referenced lock or NULL.
+ */
+static struct ldlm_lock *search_itree(struct ldlm_resource *res,
+				      struct lock_match_data *data)
+{
+	struct interval_node_extent ext = {
+		.start	= data->lmd_policy->l_extent.start,
+		.end	= data->lmd_policy->l_extent.end
+	};
+	int idx;
+
+	for (idx = 0; idx < LCK_MODE_NUM; idx++) {
+		struct ldlm_interval_tree *tree = &res->lr_itree[idx];
+
+		if (!tree->lit_root)
+			continue;
+
+		if (!(tree->lit_mode & *data->lmd_mode))
+			continue;
+
+		interval_search(tree->lit_root, &ext,
+				itree_overlap_cb, data);
+	}
+	return data->lmd_lock;
+}
+
+/**
+ * Search for a lock with given properties in a queue.
+ *
+ * \param queue	search for a lock in this queue
+ * \param data	parameters
+ *
+ * \retval	a referenced lock or NULL.
+ */
+static struct ldlm_lock *search_queue(struct list_head *queue,
+				      struct lock_match_data *data)
+{
+	struct ldlm_lock *lock;
+	int rc;
+
+	list_for_each_entry(lock, queue, l_res_link) {
+		rc = lock_matches(lock, data);
+		if (rc == INTERVAL_ITER_STOP)
+			return data->lmd_lock;
+	}
 	return NULL;
 }
 
@@ -1131,7 +1224,6 @@ void ldlm_lock_fail_match_locked(struct ldlm_lock *lock)
 		wake_up_all(&lock->l_waitq);
 	}
 }
-EXPORT_SYMBOL(ldlm_lock_fail_match_locked);
 
 /**
  * Mark lock as "matchable" by OST.
@@ -1142,7 +1234,7 @@ EXPORT_SYMBOL(ldlm_lock_fail_match_locked);
  */
 void ldlm_lock_allow_match_locked(struct ldlm_lock *lock)
 {
-	lock->l_flags |= LDLM_FL_LVB_READY;
+	ldlm_set_lvb_ready(lock);
 	wake_up_all(&lock->l_waitq);
 }
 EXPORT_SYMBOL(ldlm_lock_allow_match_locked);
@@ -1192,35 +1284,45 @@ EXPORT_SYMBOL(ldlm_lock_allow_match);
 enum ldlm_mode ldlm_lock_match(struct ldlm_namespace *ns, __u64 flags,
 			       const struct ldlm_res_id *res_id,
 			       enum ldlm_type type,
-			       ldlm_policy_data_t *policy,
+			       union ldlm_policy_data *policy,
 			       enum ldlm_mode mode,
 			       struct lustre_handle *lockh, int unref)
 {
+	struct lock_match_data data = {
+		.lmd_old	= NULL,
+		.lmd_lock	= NULL,
+		.lmd_mode	= &mode,
+		.lmd_policy	= policy,
+		.lmd_flags	= flags,
+		.lmd_unref	= unref,
+	};
 	struct ldlm_resource *res;
-	struct ldlm_lock *lock, *old_lock = NULL;
+	struct ldlm_lock *lock;
 	int rc = 0;
 
 	if (!ns) {
-		old_lock = ldlm_handle2lock(lockh);
-		LASSERT(old_lock);
+		data.lmd_old = ldlm_handle2lock(lockh);
+		LASSERT(data.lmd_old);
 
-		ns = ldlm_lock_to_ns(old_lock);
-		res_id = &old_lock->l_resource->lr_name;
-		type = old_lock->l_resource->lr_type;
-		mode = old_lock->l_req_mode;
+		ns = ldlm_lock_to_ns(data.lmd_old);
+		res_id = &data.lmd_old->l_resource->lr_name;
+		type = data.lmd_old->l_resource->lr_type;
+		*data.lmd_mode = data.lmd_old->l_req_mode;
 	}
 
 	res = ldlm_resource_get(ns, NULL, res_id, type, 0);
-	if (!res) {
-		LASSERT(!old_lock);
+	if (IS_ERR(res)) {
+		LASSERT(!data.lmd_old);
 		return 0;
 	}
 
 	LDLM_RESOURCE_ADDREF(res);
 	lock_res(res);
 
-	lock = search_queue(&res->lr_granted, &mode, policy, old_lock,
-			    flags, unref);
+	if (res->lr_type == LDLM_EXTENT)
+		lock = search_itree(res, &data);
+	else
+		lock = search_queue(&res->lr_granted, &data);
 	if (lock) {
 		rc = 1;
 		goto out;
@@ -1229,22 +1331,19 @@ enum ldlm_mode ldlm_lock_match(struct ldlm_namespace *ns, __u64 flags,
 		rc = 0;
 		goto out;
 	}
-	lock = search_queue(&res->lr_waiting, &mode, policy, old_lock,
-			    flags, unref);
+	lock = search_queue(&res->lr_waiting, &data);
 	if (lock) {
 		rc = 1;
 		goto out;
 	}
-
- out:
+out:
 	unlock_res(res);
 	LDLM_RESOURCE_DELREF(res);
 	ldlm_resource_putref(res);
 
 	if (lock) {
 		ldlm_lock2handle(lock, lockh);
-		if ((flags & LDLM_FL_LVB_READY) &&
-		    (!(lock->l_flags & LDLM_FL_LVB_READY))) {
+		if ((flags & LDLM_FL_LVB_READY) && !ldlm_is_lvb_ready(lock)) {
 			__u64 wait_flags = LDLM_FL_LVB_READY |
 				LDLM_FL_DESTROYED | LDLM_FL_FAIL_NOTIFIED;
 			struct l_wait_info lwi;
@@ -1271,7 +1370,7 @@ enum ldlm_mode ldlm_lock_match(struct ldlm_namespace *ns, __u64 flags,
 			l_wait_event(lock->l_waitq,
 				     lock->l_flags & wait_flags,
 				     &lwi);
-			if (!(lock->l_flags & LDLM_FL_LVB_READY)) {
+			if (!ldlm_is_lvb_ready(lock)) {
 				if (flags & LDLM_FL_TEST_LOCK)
 					LDLM_LOCK_RELEASE(lock);
 				else
@@ -1309,14 +1408,14 @@ enum ldlm_mode ldlm_lock_match(struct ldlm_namespace *ns, __u64 flags,
 				  (type == LDLM_PLAIN || type == LDLM_IBITS) ?
 					res_id->name[3] : policy->l_extent.end);
 	}
-	if (old_lock)
-		LDLM_LOCK_PUT(old_lock);
+	if (data.lmd_old)
+		LDLM_LOCK_PUT(data.lmd_old);
 
 	return rc ? mode : 0;
 }
 EXPORT_SYMBOL(ldlm_lock_match);
 
-enum ldlm_mode ldlm_revalidate_lock_handle(struct lustre_handle *lockh,
+enum ldlm_mode ldlm_revalidate_lock_handle(const struct lustre_handle *lockh,
 					   __u64 *bits)
 {
 	struct ldlm_lock *lock;
@@ -1325,10 +1424,10 @@ enum ldlm_mode ldlm_revalidate_lock_handle(struct lustre_handle *lockh,
 	lock = ldlm_handle2lock(lockh);
 	if (lock) {
 		lock_res_and_lock(lock);
-		if (lock->l_flags & LDLM_FL_GONE_MASK)
+		if (LDLM_HAVE_MASK(lock, GONE))
 			goto out;
 
-		if (lock->l_flags & LDLM_FL_CBPENDING &&
+		if (ldlm_is_cbpending(lock) &&
 		    lock->l_readers == 0 && lock->l_writers == 0)
 			goto out;
 
@@ -1361,12 +1460,12 @@ int ldlm_fill_lvb(struct ldlm_lock *lock, struct req_capsule *pill,
 		if (size == sizeof(struct ost_lvb)) {
 			if (loc == RCL_CLIENT)
 				lvb = req_capsule_client_swab_get(pill,
-						&RMF_DLM_LVB,
-						lustre_swab_ost_lvb);
+								  &RMF_DLM_LVB,
+							lustre_swab_ost_lvb);
 			else
 				lvb = req_capsule_server_swab_get(pill,
-						&RMF_DLM_LVB,
-						lustre_swab_ost_lvb);
+								  &RMF_DLM_LVB,
+							lustre_swab_ost_lvb);
 			if (unlikely(!lvb)) {
 				LDLM_ERROR(lock, "no LVB");
 				return -EPROTO;
@@ -1378,8 +1477,8 @@ int ldlm_fill_lvb(struct ldlm_lock *lock, struct req_capsule *pill,
 
 			if (loc == RCL_CLIENT)
 				lvb = req_capsule_client_swab_get(pill,
-						&RMF_DLM_LVB,
-						lustre_swab_ost_lvb_v1);
+								  &RMF_DLM_LVB,
+							lustre_swab_ost_lvb_v1);
 			else
 				lvb = req_capsule_server_sized_swab_get(pill,
 						&RMF_DLM_LVB, size,
@@ -1403,12 +1502,12 @@ int ldlm_fill_lvb(struct ldlm_lock *lock, struct req_capsule *pill,
 		if (size == sizeof(struct lquota_lvb)) {
 			if (loc == RCL_CLIENT)
 				lvb = req_capsule_client_swab_get(pill,
-						&RMF_DLM_LVB,
-						lustre_swab_lquota_lvb);
+								  &RMF_DLM_LVB,
+							lustre_swab_lquota_lvb);
 			else
 				lvb = req_capsule_server_swab_get(pill,
-						&RMF_DLM_LVB,
-						lustre_swab_lquota_lvb);
+								  &RMF_DLM_LVB,
+							lustre_swab_lquota_lvb);
 			if (unlikely(!lvb)) {
 				LDLM_ERROR(lock, "no LVB");
 				return -EPROTO;
@@ -1438,7 +1537,7 @@ int ldlm_fill_lvb(struct ldlm_lock *lock, struct req_capsule *pill,
 		memcpy(data, lvb, size);
 		break;
 	default:
-		LDLM_ERROR(lock, "Unknown LVB type: %d\n", lock->l_lvb_type);
+		LDLM_ERROR(lock, "Unknown LVB type: %d", lock->l_lvb_type);
 		dump_stack();
 		return -EINVAL;
 	}
@@ -1460,15 +1559,15 @@ struct ldlm_lock *ldlm_lock_create(struct ldlm_namespace *ns,
 {
 	struct ldlm_lock *lock;
 	struct ldlm_resource *res;
+	int rc;
 
 	res = ldlm_resource_get(ns, NULL, res_id, type, 1);
-	if (!res)
-		return NULL;
+	if (IS_ERR(res))
+		return ERR_CAST(res);
 
 	lock = ldlm_lock_new(res);
-
 	if (!lock)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	lock->l_req_mode = mode;
 	lock->l_ast_data = data;
@@ -1482,27 +1581,33 @@ struct ldlm_lock *ldlm_lock_create(struct ldlm_namespace *ns,
 	lock->l_tree_node = NULL;
 	/* if this is the extent lock, allocate the interval tree node */
 	if (type == LDLM_EXTENT) {
-		if (!ldlm_interval_alloc(lock))
+		if (!ldlm_interval_alloc(lock)) {
+			rc = -ENOMEM;
 			goto out;
+		}
 	}
 
 	if (lvb_len) {
 		lock->l_lvb_len = lvb_len;
 		lock->l_lvb_data = kzalloc(lvb_len, GFP_NOFS);
-		if (!lock->l_lvb_data)
+		if (!lock->l_lvb_data) {
+			rc = -ENOMEM;
 			goto out;
+		}
 	}
 
 	lock->l_lvb_type = lvb_type;
-	if (OBD_FAIL_CHECK(OBD_FAIL_LDLM_NEW_LOCK))
+	if (OBD_FAIL_CHECK(OBD_FAIL_LDLM_NEW_LOCK)) {
+		rc = -ENOENT;
 		goto out;
+	}
 
 	return lock;
 
 out:
 	ldlm_lock_destroy(lock);
 	LDLM_LOCK_RELEASE(lock);
-	return NULL;
+	return ERR_PTR(rc);
 }
 
 /**
@@ -1520,16 +1625,13 @@ enum ldlm_error ldlm_lock_enqueue(struct ldlm_namespace *ns,
 	struct ldlm_lock *lock = *lockp;
 	struct ldlm_resource *res = lock->l_resource;
 
-	lock->l_last_activity = ktime_get_real_seconds();
-
 	lock_res_and_lock(lock);
 	if (lock->l_req_mode == lock->l_granted_mode) {
 		/* The server returned a blocked lock, but it was granted
 		 * before we got a chance to actually enqueue it.  We don't
 		 * need to do anything else.
 		 */
-		*flags &= ~(LDLM_FL_BLOCK_GRANTED |
-			    LDLM_FL_BLOCK_CONV | LDLM_FL_BLOCK_WAIT);
+		*flags &= ~LDLM_FL_BLOCKED_MASK;
 		goto out;
 	}
 
@@ -1542,7 +1644,10 @@ enum ldlm_error ldlm_lock_enqueue(struct ldlm_namespace *ns,
 	/* Some flags from the enqueue want to make it into the AST, via the
 	 * lock's l_flags.
 	 */
-	lock->l_flags |= *flags & LDLM_FL_AST_DISCARD_DATA;
+	if (*flags & LDLM_FL_AST_DISCARD_DATA)
+		ldlm_set_ast_discard_data(lock);
+	if (*flags & LDLM_FL_TEST_LOCK)
+		ldlm_set_test_lock(lock);
 
 	/*
 	 * This distinction between local lock trees is very important; a client
@@ -1581,7 +1686,7 @@ ldlm_work_bl_ast_lock(struct ptlrpc_request_set *rqset, void *opaq)
 	lock_res_and_lock(lock);
 	list_del_init(&lock->l_bl_ast);
 
-	LASSERT(lock->l_flags & LDLM_FL_AST_SENT);
+	LASSERT(ldlm_is_ast_sent(lock));
 	LASSERT(lock->l_bl_ast_run == 0);
 	LASSERT(lock->l_blocking_lock);
 	lock->l_bl_ast_run++;
@@ -1628,12 +1733,12 @@ ldlm_work_cp_ast_lock(struct ptlrpc_request_set *rqset, void *opaq)
 	/* nobody should touch l_cp_ast */
 	lock_res_and_lock(lock);
 	list_del_init(&lock->l_cp_ast);
-	LASSERT(lock->l_flags & LDLM_FL_CP_REQD);
+	LASSERT(ldlm_is_cp_reqd(lock));
 	/* save l_completion_ast since it can be changed by
 	 * mds_intent_policy(), see bug 14225
 	 */
 	completion_callback = lock->l_completion_ast;
-	lock->l_flags &= ~LDLM_FL_CP_REQD;
+	ldlm_clear_cp_reqd(lock);
 	unlock_res_and_lock(lock);
 
 	if (completion_callback)
@@ -1685,7 +1790,7 @@ static int ldlm_work_gl_ast_lock(struct ptlrpc_request_set *rqset, void *opaq)
 		return -ENOENT;
 
 	gl_work = list_entry(arg->list->next, struct ldlm_glimpse_work,
-				 gl_list);
+			     gl_list);
 	list_del_init(&gl_work->gl_list);
 
 	lock = gl_work->gl_lock;
@@ -1778,8 +1883,8 @@ out:
 void ldlm_cancel_callback(struct ldlm_lock *lock)
 {
 	check_res_locked(lock->l_resource);
-	if (!(lock->l_flags & LDLM_FL_CANCEL)) {
-		lock->l_flags |= LDLM_FL_CANCEL;
+	if (!ldlm_is_cancel(lock)) {
+		ldlm_set_cancel(lock);
 		if (lock->l_blocking_ast) {
 			unlock_res_and_lock(lock);
 			lock->l_blocking_ast(lock, NULL, lock->l_ast_data,
@@ -1789,7 +1894,7 @@ void ldlm_cancel_callback(struct ldlm_lock *lock)
 			LDLM_DEBUG(lock, "no blocking ast");
 		}
 	}
-	lock->l_flags |= LDLM_FL_BL_DONE;
+	ldlm_set_bl_done(lock);
 }
 
 /**
@@ -1846,7 +1951,7 @@ EXPORT_SYMBOL(ldlm_lock_cancel);
 /**
  * Set opaque data into the lock that only makes sense to upper layer.
  */
-int ldlm_lock_set_data(struct lustre_handle *lockh, void *data)
+int ldlm_lock_set_data(const struct lustre_handle *lockh, void *data)
 {
 	struct ldlm_lock *lock = ldlm_handle2lock(lockh);
 	int rc = -EINVAL;
@@ -1872,7 +1977,7 @@ struct export_cl_data {
  *
  * Used when printing all locks on a resource for debug purposes.
  */
-void ldlm_lock_dump_handle(int level, struct lustre_handle *lockh)
+void ldlm_lock_dump_handle(int level, const struct lustre_handle *lockh)
 {
 	struct ldlm_lock *lock;
 

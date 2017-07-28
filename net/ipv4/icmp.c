@@ -91,7 +91,7 @@
 #include <linux/errno.h>
 #include <linux/timer.h>
 #include <linux/init.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <net/checksum.h>
 #include <net/xfrm.h>
 #include <net/inet_common.h>
@@ -363,7 +363,7 @@ static void icmp_push_reply(struct icmp_bxm *icmp_param,
 			   icmp_param->data_len+icmp_param->head_len,
 			   icmp_param->head_len,
 			   ipc, rt, MSG_DONTWAIT) < 0) {
-		ICMP_INC_STATS_BH(sock_net(sk), ICMP_MIB_OUTERRORS);
+		__ICMP_INC_STATS(sock_net(sk), ICMP_MIB_OUTERRORS);
 		ip_flush_pending_frames(sk);
 	} else if ((skb = skb_peek(&sk->sk_write_queue)) != NULL) {
 		struct icmphdr *icmph = icmp_hdr(skb);
@@ -425,6 +425,7 @@ static void icmp_reply(struct icmp_bxm *icmp_param, struct sk_buff *skb)
 	fl4.daddr = daddr;
 	fl4.saddr = saddr;
 	fl4.flowi4_mark = mark;
+	fl4.flowi4_uid = sock_net_uid(net, NULL);
 	fl4.flowi4_tos = RT_TOS(ip_hdr(skb)->tos);
 	fl4.flowi4_proto = IPPROTO_ICMP;
 	fl4.flowi4_oif = l3mdev_master_ifindex(skb->dev);
@@ -473,11 +474,12 @@ static struct rtable *icmp_route_lookup(struct net *net,
 		      param->replyopts.opt.opt.faddr : iph->saddr);
 	fl4->saddr = saddr;
 	fl4->flowi4_mark = mark;
+	fl4->flowi4_uid = sock_net_uid(net, NULL);
 	fl4->flowi4_tos = RT_TOS(tos);
 	fl4->flowi4_proto = IPPROTO_ICMP;
 	fl4->fl4_icmp_type = type;
 	fl4->fl4_icmp_code = code;
-	fl4->flowi4_oif = l3mdev_master_ifindex(skb_in->dev);
+	fl4->flowi4_oif = l3mdev_master_ifindex(skb_dst(skb_in)->dev);
 
 	security_skb_classify_flow(skb_in, flowi4_to_flowi(fl4));
 	rt = __ip_route_output_key_hash(net, fl4,
@@ -502,7 +504,7 @@ static struct rtable *icmp_route_lookup(struct net *net,
 	if (err)
 		goto relookup_failed;
 
-	if (inet_addr_type_dev_table(net, skb_in->dev,
+	if (inet_addr_type_dev_table(net, skb_dst(skb_in)->dev,
 				     fl4_dec.saddr) == RTN_LOCAL) {
 		rt2 = __ip_route_output_key(net, &fl4_dec);
 		if (IS_ERR(rt2))
@@ -744,7 +746,7 @@ static void icmp_socket_deliver(struct sk_buff *skb, u32 info)
 	 * avoid additional coding at protocol handlers.
 	 */
 	if (!pskb_may_pull(skb, iph->ihl * 4 + 8)) {
-		ICMP_INC_STATS_BH(dev_net(skb->dev), ICMP_MIB_INERRORS);
+		__ICMP_INC_STATS(dev_net(skb->dev), ICMP_MIB_INERRORS);
 		return;
 	}
 
@@ -865,7 +867,7 @@ static bool icmp_unreach(struct sk_buff *skb)
 out:
 	return true;
 out_err:
-	ICMP_INC_STATS_BH(net, ICMP_MIB_INERRORS);
+	__ICMP_INC_STATS(net, ICMP_MIB_INERRORS);
 	return false;
 }
 
@@ -877,7 +879,7 @@ out_err:
 static bool icmp_redirect(struct sk_buff *skb)
 {
 	if (skb->len < sizeof(struct iphdr)) {
-		ICMP_INC_STATS_BH(dev_net(skb->dev), ICMP_MIB_INERRORS);
+		__ICMP_INC_STATS(dev_net(skb->dev), ICMP_MIB_INERRORS);
 		return false;
 	}
 
@@ -956,7 +958,7 @@ static bool icmp_timestamp(struct sk_buff *skb)
 	return true;
 
 out_err:
-	ICMP_INC_STATS_BH(dev_net(skb_dst(skb)->dev), ICMP_MIB_INERRORS);
+	__ICMP_INC_STATS(dev_net(skb_dst(skb)->dev), ICMP_MIB_INERRORS);
 	return false;
 }
 
@@ -996,7 +998,7 @@ int icmp_rcv(struct sk_buff *skb)
 		skb_set_network_header(skb, nh);
 	}
 
-	ICMP_INC_STATS_BH(net, ICMP_MIB_INMSGS);
+	__ICMP_INC_STATS(net, ICMP_MIB_INMSGS);
 
 	if (skb_checksum_simple_validate(skb))
 		goto csum_error;
@@ -1006,7 +1008,7 @@ int icmp_rcv(struct sk_buff *skb)
 
 	icmph = icmp_hdr(skb);
 
-	ICMPMSGIN_INC_STATS_BH(net, icmph->type);
+	ICMPMSGIN_INC_STATS(net, icmph->type);
 	/*
 	 *	18 is the highest 'known' ICMP type. Anything else is a mystery
 	 *
@@ -1045,16 +1047,16 @@ int icmp_rcv(struct sk_buff *skb)
 
 	if (success)  {
 		consume_skb(skb);
-		return 0;
+		return NET_RX_SUCCESS;
 	}
 
 drop:
 	kfree_skb(skb);
-	return 0;
+	return NET_RX_DROP;
 csum_error:
-	ICMP_INC_STATS_BH(net, ICMP_MIB_CSUMERRORS);
+	__ICMP_INC_STATS(net, ICMP_MIB_CSUMERRORS);
 error:
-	ICMP_INC_STATS_BH(net, ICMP_MIB_INERRORS);
+	__ICMP_INC_STATS(net, ICMP_MIB_INERRORS);
 	goto drop;
 }
 

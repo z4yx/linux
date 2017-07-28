@@ -40,6 +40,7 @@
 #include "crypto4xx_reg_def.h"
 #include "crypto4xx_core.h"
 #include "crypto4xx_sa.h"
+#include "crypto4xx_trng.h"
 
 #define PPC4XX_SEC_VERSION_STR			"0.5"
 
@@ -134,8 +135,7 @@ int crypto4xx_alloc_sa(struct crypto4xx_ctx *ctx, u32 size)
 	ctx->sa_out = dma_alloc_coherent(ctx->dev->core_dev->device, size * 4,
 					 &ctx->sa_out_dma_addr, GFP_ATOMIC);
 	if (ctx->sa_out == NULL) {
-		dma_free_coherent(ctx->dev->core_dev->device,
-				  ctx->sa_len * 4,
+		dma_free_coherent(ctx->dev->core_dev->device, size * 4,
 				  ctx->sa_in, ctx->sa_in_dma_addr);
 		return -ENOMEM;
 	}
@@ -1225,6 +1225,7 @@ static int crypto4xx_probe(struct platform_device *ofdev)
 	if (rc)
 		goto err_start_dev;
 
+	ppc4xx_trng_probe(core_dev);
 	return 0;
 
 err_start_dev:
@@ -1252,6 +1253,8 @@ static int crypto4xx_remove(struct platform_device *ofdev)
 	struct device *dev = &ofdev->dev;
 	struct crypto4xx_core_device *core_dev = dev_get_drvdata(dev);
 
+	ppc4xx_trng_remove(core_dev);
+
 	free_irq(core_dev->irq, dev);
 	irq_dispose_mapping(core_dev->irq);
 
@@ -1272,7 +1275,7 @@ MODULE_DEVICE_TABLE(of, crypto4xx_match);
 
 static struct platform_driver crypto4xx_driver = {
 	.driver = {
-		.name = "crypto4xx",
+		.name = MODULE_NAME,
 		.of_match_table = crypto4xx_match,
 	},
 	.probe		= crypto4xx_probe,
@@ -1284,4 +1287,3 @@ module_platform_driver(crypto4xx_driver);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("James Hsiao <jhsiao@amcc.com>");
 MODULE_DESCRIPTION("Driver for AMCC PPC4xx crypto accelerator");
-

@@ -222,7 +222,7 @@ jme_clear_ghc_reset(struct jme_adapter *jme)
 	jwrite32f(jme, JME_GHC, jme->reg_ghc);
 }
 
-static inline void
+static void
 jme_reset_mac_processor(struct jme_adapter *jme)
 {
 	static const u32 mask[WAKEUP_FRAME_MASK_DWNR] = {0, 0, 0, 0};
@@ -2357,14 +2357,6 @@ jme_change_mtu(struct net_device *netdev, int new_mtu)
 {
 	struct jme_adapter *jme = netdev_priv(netdev);
 
-	if (new_mtu == jme->old_mtu)
-		return 0;
-
-	if (((new_mtu + ETH_HLEN) > MAX_ETHERNET_JUMBO_PACKET_SIZE) ||
-		((new_mtu) < IPV6_MIN_MTU))
-		return -EINVAL;
-
-
 	netdev->mtu = new_mtu;
 	netdev_update_features(netdev);
 
@@ -3062,6 +3054,10 @@ jme_init_one(struct pci_dev *pdev,
 						NETIF_F_HW_VLAN_CTAG_RX;
 	if (using_dac)
 		netdev->features	|=	NETIF_F_HIGHDMA;
+
+	/* MTU range: 1280 - 9202*/
+	netdev->min_mtu = IPV6_MIN_MTU;
+	netdev->max_mtu = MAX_ETHERNET_JUMBO_PACKET_SIZE - ETH_HLEN;
 
 	SET_NETDEV_DEV(netdev, &pdev->dev);
 	pci_set_drvdata(pdev, netdev);

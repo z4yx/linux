@@ -245,7 +245,6 @@ static const struct net_device_ops atp_netdev_ops = {
 	.ndo_start_xmit		= atp_send_packet,
 	.ndo_set_rx_mode	= set_rx_mode,
 	.ndo_tx_timeout		= tx_timeout,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -544,7 +543,7 @@ static void tx_timeout(struct net_device *dev)
 	dev->stats.tx_errors++;
 	/* Try to restart the adapter. */
 	hardware_init(dev);
-	dev->trans_start = jiffies; /* prevent tx timeout */
+	netif_trans_update(dev); /* prevent tx timeout */
 	netif_wake_queue(dev);
 	dev->stats.tx_errors++;
 }

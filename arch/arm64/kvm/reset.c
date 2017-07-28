@@ -29,7 +29,9 @@
 #include <asm/cputype.h>
 #include <asm/ptrace.h>
 #include <asm/kvm_arm.h>
+#include <asm/kvm_asm.h>
 #include <asm/kvm_coproc.h>
+#include <asm/kvm_mmu.h>
 
 /*
  * ARMv8 Reset Values
@@ -63,7 +65,7 @@ static bool cpu_has_32bit_el1(void)
  * We currently assume that the number of HW registers is uniform
  * across all CPUs (see cpuinfo_sanity_check).
  */
-int kvm_arch_dev_ioctl_check_extension(long ext)
+int kvm_arch_dev_ioctl_check_extension(struct kvm *kvm, long ext)
 {
 	int r;
 
@@ -96,7 +98,7 @@ int kvm_arch_dev_ioctl_check_extension(long ext)
  * @vcpu: The VCPU pointer
  *
  * This function finds the right table above and sets the registers on
- * the virtual CPU struct to their architectually defined reset
+ * the virtual CPU struct to their architecturally defined reset
  * values.
  */
 int kvm_reset_vcpu(struct kvm_vcpu *vcpu)

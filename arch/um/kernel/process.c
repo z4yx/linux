@@ -24,7 +24,7 @@
 #include <asm/current.h>
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <as-layout.h>
 #include <kern_util.h>
 #include <os.h>
@@ -101,10 +101,6 @@ void interrupt_end(void)
 		do_signal(regs);
 	if (test_and_clear_thread_flag(TIF_NOTIFY_RESUME))
 		tracehook_notify_resume(regs);
-}
-
-void exit_thread(void)
-{
 }
 
 int get_current_pid(void)
@@ -402,6 +398,6 @@ int elf_core_copy_fpregs(struct task_struct *t, elf_fpregset_t *fpu)
 {
 	int cpu = current_thread_info()->cpu;
 
-	return save_fp_registers(userspace_pid[cpu], (unsigned long *) fpu);
+	return save_i387_registers(userspace_pid[cpu], (unsigned long *) fpu);
 }
 

@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2015 Intel Corporation.
+ * Copyright(c) 2013 - 2016 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -36,16 +36,6 @@
 
 #include "i40e.h"
 #include "i40e_fcoe.h"
-
-/**
- * i40e_rx_is_fcoe - returns true if the rx packet type is FCoE
- * @ptype: the packet type field from rx descriptor write-back
- **/
-static inline bool i40e_rx_is_fcoe(u16 ptype)
-{
-	return (ptype >= I40E_RX_PTYPE_L2_FCOE_PAY3) &&
-	       (ptype <= I40E_RX_PTYPE_L2_FCOE_VFT_FCOTHER);
-}
 
 /**
  * i40e_fcoe_sof_is_class2 - returns true if this is a FC Class 2 SOF
@@ -1371,7 +1361,7 @@ static netdev_tx_t i40e_fcoe_xmit_frame(struct sk_buff *skb,
 	if (i40e_chk_linearize(skb, count)) {
 		if (__skb_linearize(skb))
 			goto out_drop;
-		count = TXD_USE_COUNT(skb->len);
+		count = i40e_txd_use_count(skb->len);
 		tx_ring->tx_stats.tx_linearize++;
 	}
 
@@ -1532,12 +1522,12 @@ void i40e_fcoe_config_netdev(struct net_device *netdev, struct i40e_vsi *vsi)
 	 * same PCI function.
 	 */
 	netdev->dev_port = 1;
-	spin_lock_bh(&vsi->mac_filter_list_lock);
-	i40e_add_filter(vsi, hw->mac.san_addr, 0, false, false);
-	i40e_add_filter(vsi, (u8[6]) FC_FCOE_FLOGI_MAC, 0, false, false);
-	i40e_add_filter(vsi, FIP_ALL_FCOE_MACS, 0, false, false);
-	i40e_add_filter(vsi, FIP_ALL_ENODE_MACS, 0, false, false);
-	spin_unlock_bh(&vsi->mac_filter_list_lock);
+	spin_lock_bh(&vsi->mac_filter_hash_lock);
+	i40e_add_filter(vsi, hw->mac.san_addr, 0);
+	i40e_add_filter(vsi, (u8[6]) FC_FCOE_FLOGI_MAC, 0);
+	i40e_add_filter(vsi, FIP_ALL_FCOE_MACS, 0);
+	i40e_add_filter(vsi, FIP_ALL_ENODE_MACS, 0);
+	spin_unlock_bh(&vsi->mac_filter_hash_lock);
 
 	/* use san mac */
 	ether_addr_copy(netdev->dev_addr, hw->mac.san_addr);

@@ -219,11 +219,11 @@ static int byt_rt5651_aif1_startup(struct snd_pcm_substream *substream)
 			&constraints_48000);
 }
 
-static struct snd_soc_ops byt_rt5651_aif1_ops = {
+static const struct snd_soc_ops byt_rt5651_aif1_ops = {
 	.startup = byt_rt5651_aif1_startup,
 };
 
-static struct snd_soc_ops byt_rt5651_be_ssp2_ops = {
+static const struct snd_soc_ops byt_rt5651_be_ssp2_ops = {
 	.hw_params = byt_rt5651_aif1_hw_params,
 };
 
@@ -267,7 +267,7 @@ static struct snd_soc_dai_link byt_rt5651_dais[] = {
 	/* back ends */
 	{
 		.name = "SSP2-Codec",
-		.be_id = 1,
+		.id = 1,
 		.cpu_dai_name = "ssp2-port",
 		.platform_name = "sst-mfld-platform",
 		.no_pcm = 1,

@@ -6,9 +6,11 @@
  */
 #include "qla_def.h"
 #include <linux/delay.h>
+#include <linux/ktime.h>
 #include <linux/pci.h>
 #include <linux/ratelimit.h>
 #include <linux/vmalloc.h>
+#include <linux/bsg-lib.h>
 #include <scsi/scsi_tcq.h>
 #include <linux/utsname.h>
 
@@ -1812,7 +1814,6 @@ qlafx00_fx_disc(scsi_qla_host_t *vha, fc_port_t *fcport, uint16_t fx_type)
 	struct host_system_info *phost_info;
 	struct register_host_info *preg_hsi;
 	struct new_utsname *p_sysid = NULL;
-	struct timeval tv;
 
 	sp = qla2x00_get_sp(vha, fcport, GFP_KERNEL);
 	if (!sp)
@@ -1886,8 +1887,7 @@ qlafx00_fx_disc(scsi_qla_host_t *vha, fc_port_t *fcport, uint16_t fx_type)
 			    p_sysid->domainname, DOMNAME_LENGTH);
 			strncpy(phost_info->hostdriver,
 			    QLA2XXX_VERSION, VERSION_LENGTH);
-			do_gettimeofday(&tv);
-			preg_hsi->utc = (uint64_t)tv.tv_sec;
+			preg_hsi->utc = (uint64_t)ktime_get_real_seconds();
 			ql_dbg(ql_dbg_init, vha, 0x0149,
 			    "ISP%04X: Host registration with firmware\n",
 			    ha->pdev->device);
@@ -2207,7 +2207,8 @@ qlafx00_ioctl_iosb_entry(scsi_qla_host_t *vha, struct req_que *req,
 {
 	const char func[] = "IOSB_IOCB";
 	srb_t *sp;
-	struct fc_bsg_job *bsg_job;
+	struct bsg_job *bsg_job;
+	struct fc_bsg_reply *bsg_reply;
 	struct srb_iocb *iocb_job;
 	int res;
 	struct qla_mt_iocb_rsp_fx00 fstatus;
@@ -2227,6 +2228,7 @@ qlafx00_ioctl_iosb_entry(scsi_qla_host_t *vha, struct req_que *req,
 			    pkt->dataword_r;
 	} else {
 		bsg_job = sp->u.bsg_job;
+		bsg_reply = bsg_job->reply;
 
 		memset(&fstatus, 0, sizeof(struct qla_mt_iocb_rsp_fx00));
 
@@ -2258,8 +2260,8 @@ qlafx00_ioctl_iosb_entry(scsi_qla_host_t *vha, struct req_que *req,
 		    sp->fcport->vha, 0x5074,
 		    (uint8_t *)fw_sts_ptr, sizeof(struct qla_mt_iocb_rsp_fx00));
 
-		res = bsg_job->reply->result = DID_OK << 16;
-		bsg_job->reply->reply_payload_rcv_len =
+		res = bsg_reply->result = DID_OK << 16;
+		bsg_reply->reply_payload_rcv_len =
 		    bsg_job->reply_payload.payload_len;
 	}
 	sp->done(vha, sp, res);
@@ -3253,7 +3255,8 @@ qlafx00_fxdisc_iocb(srb_t *sp, struct fxdisc_entry_fx00 *pfxiocb)
 {
 	struct srb_iocb *fxio = &sp->u.iocb_cmd;
 	struct qla_mt_iocb_rqst_fx00 *piocb_rqst;
-	struct fc_bsg_job *bsg_job;
+	struct bsg_job *bsg_job;
+	struct fc_bsg_request *bsg_request;
 	struct fxdisc_entry_fx00 fx_iocb;
 	uint8_t entry_cnt = 1;
 
@@ -3302,8 +3305,9 @@ qlafx00_fxdisc_iocb(srb_t *sp, struct fxdisc_entry_fx00 *pfxiocb)
 	} else {
 		struct scatterlist *sg;
 		bsg_job = sp->u.bsg_job;
+		bsg_request = bsg_job->request;
 		piocb_rqst = (struct qla_mt_iocb_rqst_fx00 *)
-			&bsg_job->request->rqst_data.h_vendor.vendor_cmd[1];
+			&bsg_request->rqst_data.h_vendor.vendor_cmd[1];
 
 		fx_iocb.func_num = piocb_rqst->func_type;
 		fx_iocb.adapid = piocb_rqst->adapid;

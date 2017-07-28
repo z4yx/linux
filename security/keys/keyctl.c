@@ -23,7 +23,7 @@
 #include <linux/vmalloc.h>
 #include <linux/security.h>
 #include <linux/uio.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include "internal.h"
 
 #define KEY_MAX_DESC_SIZE 4096
@@ -1074,7 +1074,7 @@ long keyctl_instantiate_key_common(key_serial_t id,
 		}
 
 		ret = -EFAULT;
-		if (copy_from_iter(payload, plen, from) != plen)
+		if (!copy_from_iter_full(payload, plen, from))
 			goto error2;
 	}
 
@@ -1685,6 +1685,11 @@ SYSCALL_DEFINE5(keyctl, int, option, unsigned long, arg2, unsigned long, arg3,
 
 	case KEYCTL_GET_PERSISTENT:
 		return keyctl_get_persistent((uid_t)arg2, (key_serial_t)arg3);
+
+	case KEYCTL_DH_COMPUTE:
+		return keyctl_dh_compute((struct keyctl_dh_params __user *) arg2,
+					 (char __user *) arg3, (size_t) arg4,
+					 (void __user *) arg5);
 
 	default:
 		return -EOPNOTSUPP;

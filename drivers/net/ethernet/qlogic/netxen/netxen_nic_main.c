@@ -1572,6 +1572,13 @@ netxen_nic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			adapter->physical_port = i;
 	}
 
+	/* MTU range: 0 - 8000 (P2) or 9600 (P3) */
+	netdev->min_mtu = 0;
+	if (NX_IS_REVISION_P3(adapter->ahw.revision_id))
+		netdev->max_mtu = P3_MAX_MTU;
+	else
+		netdev->max_mtu = P2_MAX_MTU;
+
 	netxen_nic_clear_stats(adapter);
 
 	err = netxen_setup_intr(adapter);
@@ -2286,7 +2293,7 @@ static void netxen_tx_timeout_task(struct work_struct *work)
 			goto request_reset;
 		}
 	}
-	adapter->netdev->trans_start = jiffies;
+	netif_trans_update(adapter->netdev);
 	rtnl_unlock();
 	return;
 

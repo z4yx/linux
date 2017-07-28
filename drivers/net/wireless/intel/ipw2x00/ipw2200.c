@@ -4093,7 +4093,7 @@ static const char *ipw_get_status_code(u16 status)
 	return "Unknown status value.";
 }
 
-static void inline average_init(struct average *avg)
+static inline void average_init(struct average *avg)
 {
 	memset(avg, 0, sizeof(*avg));
 }
@@ -7707,7 +7707,7 @@ static void ipw_handle_data_packet(struct ipw_priv *priv,
 	struct ipw_rx_packet *pkt = (struct ipw_rx_packet *)rxb->skb->data;
 
 	/* We received data from the HW, so stop the watchdog */
-	dev->trans_start = jiffies;
+	netif_trans_update(dev);
 
 	/* We only process data packets if the
 	 * interface is open */
@@ -7770,7 +7770,7 @@ static void ipw_handle_data_packet_monitor(struct ipw_priv *priv,
 	unsigned short len = le16_to_cpu(pkt->u.frame.length);
 
 	/* We received data from the HW, so stop the watchdog */
-	dev->trans_start = jiffies;
+	netif_trans_update(dev);
 
 	/* We only process data packets if the
 	 * interface is open */
@@ -7952,7 +7952,7 @@ static void ipw_handle_promiscuous_rx(struct ipw_priv *priv,
 		return;
 
 	/* We received data from the HW, so stop the watchdog */
-	dev->trans_start = jiffies;
+	netif_trans_update(dev);
 
 	if (unlikely((len + IPW_RX_FRAME_SIZE) > skb_tailroom(rxb->skb))) {
 		dev->stats.rx_errors++;
@@ -11359,7 +11359,7 @@ static int ipw_wdev_init(struct net_device *dev)
 	if (geo->bg_channels) {
 		struct ieee80211_supported_band *bg_band = &priv->ieee->bg_band;
 
-		bg_band->band = IEEE80211_BAND_2GHZ;
+		bg_band->band = NL80211_BAND_2GHZ;
 		bg_band->n_channels = geo->bg_channels;
 		bg_band->channels = kcalloc(geo->bg_channels,
 					    sizeof(struct ieee80211_channel),
@@ -11370,7 +11370,7 @@ static int ipw_wdev_init(struct net_device *dev)
 		}
 		/* translate geo->bg to bg_band.channels */
 		for (i = 0; i < geo->bg_channels; i++) {
-			bg_band->channels[i].band = IEEE80211_BAND_2GHZ;
+			bg_band->channels[i].band = NL80211_BAND_2GHZ;
 			bg_band->channels[i].center_freq = geo->bg[i].freq;
 			bg_band->channels[i].hw_value = geo->bg[i].channel;
 			bg_band->channels[i].max_power = geo->bg[i].max_power;
@@ -11391,14 +11391,14 @@ static int ipw_wdev_init(struct net_device *dev)
 		bg_band->bitrates = ipw2200_bg_rates;
 		bg_band->n_bitrates = ipw2200_num_bg_rates;
 
-		wdev->wiphy->bands[IEEE80211_BAND_2GHZ] = bg_band;
+		wdev->wiphy->bands[NL80211_BAND_2GHZ] = bg_band;
 	}
 
 	/* fill-out priv->ieee->a_band */
 	if (geo->a_channels) {
 		struct ieee80211_supported_band *a_band = &priv->ieee->a_band;
 
-		a_band->band = IEEE80211_BAND_5GHZ;
+		a_band->band = NL80211_BAND_5GHZ;
 		a_band->n_channels = geo->a_channels;
 		a_band->channels = kcalloc(geo->a_channels,
 					   sizeof(struct ieee80211_channel),
@@ -11409,7 +11409,7 @@ static int ipw_wdev_init(struct net_device *dev)
 		}
 		/* translate geo->a to a_band.channels */
 		for (i = 0; i < geo->a_channels; i++) {
-			a_band->channels[i].band = IEEE80211_BAND_5GHZ;
+			a_band->channels[i].band = NL80211_BAND_5GHZ;
 			a_band->channels[i].center_freq = geo->a[i].freq;
 			a_band->channels[i].hw_value = geo->a[i].channel;
 			a_band->channels[i].max_power = geo->a[i].max_power;
@@ -11430,7 +11430,7 @@ static int ipw_wdev_init(struct net_device *dev)
 		a_band->bitrates = ipw2200_a_rates;
 		a_band->n_bitrates = ipw2200_num_a_rates;
 
-		wdev->wiphy->bands[IEEE80211_BAND_5GHZ] = a_band;
+		wdev->wiphy->bands[NL80211_BAND_5GHZ] = a_band;
 	}
 
 	wdev->wiphy->cipher_suites = ipw_cipher_suites;
@@ -11561,7 +11561,6 @@ static const struct net_device_ops ipw_prom_netdev_ops = {
 	.ndo_open 		= ipw_prom_open,
 	.ndo_stop		= ipw_prom_stop,
 	.ndo_start_xmit		= ipw_prom_hard_start_xmit,
-	.ndo_change_mtu		= libipw_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -11586,6 +11585,9 @@ static int ipw_prom_alloc(struct ipw_priv *priv)
 
 	priv->prom_net_dev->type = ARPHRD_IEEE80211_RADIOTAP;
 	priv->prom_net_dev->netdev_ops = &ipw_prom_netdev_ops;
+
+	priv->prom_net_dev->min_mtu = 68;
+	priv->prom_net_dev->max_mtu = LIBIPW_DATA_LEN;
 
 	priv->prom_priv->ieee->iw_mode = IW_MODE_MONITOR;
 	SET_NETDEV_DEV(priv->prom_net_dev, &priv->pci_dev->dev);
@@ -11619,7 +11621,6 @@ static const struct net_device_ops ipw_netdev_ops = {
 	.ndo_set_rx_mode	= ipw_net_set_multicast_list,
 	.ndo_set_mac_address	= ipw_net_set_mac_address,
 	.ndo_start_xmit		= libipw_xmit,
-	.ndo_change_mtu		= libipw_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
@@ -11728,6 +11729,9 @@ static int ipw_pci_probe(struct pci_dev *pdev,
 	net_dev->wireless_data = &priv->wireless_data;
 	net_dev->wireless_handlers = &ipw_wx_handler_def;
 	net_dev->ethtool_ops = &ipw_ethtool_ops;
+
+	net_dev->min_mtu = 68;
+	net_dev->max_mtu = LIBIPW_DATA_LEN;
 
 	err = sysfs_create_group(&pdev->dev.kobj, &ipw_attribute_group);
 	if (err) {

@@ -24,11 +24,10 @@
 /* vcpu is already in the HYP VA space */
 void __hyp_text __timer_save_state(struct kvm_vcpu *vcpu)
 {
-	struct kvm *kvm = kern_hyp_va(vcpu->kvm);
 	struct arch_timer_cpu *timer = &vcpu->arch.timer_cpu;
 	u64 val;
 
-	if (kvm->arch.timer.enabled) {
+	if (timer->enabled) {
 		timer->cntv_ctl = read_sysreg_el0(cntv_ctl);
 		timer->cntv_cval = read_sysreg_el0(cntv_cval);
 	}
@@ -36,10 +35,16 @@ void __hyp_text __timer_save_state(struct kvm_vcpu *vcpu)
 	/* Disable the virtual timer */
 	write_sysreg_el0(0, cntv_ctl);
 
-	/* Allow physical timer/counter access for the host */
-	val = read_sysreg(cnthctl_el2);
-	val |= CNTHCTL_EL1PCTEN | CNTHCTL_EL1PCEN;
-	write_sysreg(val, cnthctl_el2);
+	/*
+	 * We don't need to do this for VHE since the host kernel runs in EL2
+	 * with HCR_EL2.TGE ==1, which makes those bits have no impact.
+	 */
+	if (!has_vhe()) {
+		/* Allow physical timer/counter access for the host */
+		val = read_sysreg(cnthctl_el2);
+		val |= CNTHCTL_EL1PCTEN | CNTHCTL_EL1PCEN;
+		write_sysreg(val, cnthctl_el2);
+	}
 
 	/* Clear cntvoff for the host */
 	write_sysreg(0, cntvoff_el2);
@@ -51,16 +56,19 @@ void __hyp_text __timer_restore_state(struct kvm_vcpu *vcpu)
 	struct arch_timer_cpu *timer = &vcpu->arch.timer_cpu;
 	u64 val;
 
-	/*
-	 * Disallow physical timer access for the guest
-	 * Physical counter access is allowed
-	 */
-	val = read_sysreg(cnthctl_el2);
-	val &= ~CNTHCTL_EL1PCEN;
-	val |= CNTHCTL_EL1PCTEN;
-	write_sysreg(val, cnthctl_el2);
+	/* Those bits are already configured at boot on VHE-system */
+	if (!has_vhe()) {
+		/*
+		 * Disallow physical timer access for the guest
+		 * Physical counter access is allowed
+		 */
+		val = read_sysreg(cnthctl_el2);
+		val &= ~CNTHCTL_EL1PCEN;
+		val |= CNTHCTL_EL1PCTEN;
+		write_sysreg(val, cnthctl_el2);
+	}
 
-	if (kvm->arch.timer.enabled) {
+	if (timer->enabled) {
 		write_sysreg(kvm->arch.timer.cntvoff, cntvoff_el2);
 		write_sysreg_el0(timer->cntv_cval, cntv_cval);
 		isb();

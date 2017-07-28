@@ -26,6 +26,8 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/log2.h>
+#include <linux/of.h>
+#include <linux/of_net.h>
 
 #include "rt2x00.h"
 #include "rt2x00lib.h"
@@ -911,7 +913,7 @@ static void rt2x00lib_channel(struct ieee80211_channel *entry,
 			      const int value)
 {
 	/* XXX: this assumption about the band is wrong for 802.11j */
-	entry->band = channel <= 14 ? IEEE80211_BAND_2GHZ : IEEE80211_BAND_5GHZ;
+	entry->band = channel <= 14 ? NL80211_BAND_2GHZ : NL80211_BAND_5GHZ;
 	entry->center_freq = ieee80211_channel_to_frequency(channel,
 							    entry->band);
 	entry->hw_value = value;
@@ -930,6 +932,21 @@ static void rt2x00lib_rate(struct ieee80211_rate *entry,
 	if (rate->flags & DEV_RATE_SHORT_PREAMBLE)
 		entry->flags |= IEEE80211_RATE_SHORT_PREAMBLE;
 }
+
+void rt2x00lib_set_mac_address(struct rt2x00_dev *rt2x00dev, u8 *eeprom_mac_addr)
+{
+	const char *mac_addr;
+
+	mac_addr = of_get_mac_address(rt2x00dev->dev->of_node);
+	if (mac_addr)
+		ether_addr_copy(eeprom_mac_addr, mac_addr);
+
+	if (!is_valid_ether_addr(eeprom_mac_addr)) {
+		eth_random_addr(eeprom_mac_addr);
+		rt2x00_eeprom_dbg(rt2x00dev, "MAC: %pM\n", eeprom_mac_addr);
+	}
+}
+EXPORT_SYMBOL_GPL(rt2x00lib_set_mac_address);
 
 static int rt2x00lib_probe_hw_modes(struct rt2x00_dev *rt2x00dev,
 				    struct hw_mode_spec *spec)
@@ -975,13 +992,13 @@ static int rt2x00lib_probe_hw_modes(struct rt2x00_dev *rt2x00dev,
 	 * Channels: 2.4 GHz
 	 */
 	if (spec->supported_bands & SUPPORT_BAND_2GHZ) {
-		rt2x00dev->bands[IEEE80211_BAND_2GHZ].n_channels = 14;
-		rt2x00dev->bands[IEEE80211_BAND_2GHZ].n_bitrates = num_rates;
-		rt2x00dev->bands[IEEE80211_BAND_2GHZ].channels = channels;
-		rt2x00dev->bands[IEEE80211_BAND_2GHZ].bitrates = rates;
-		hw->wiphy->bands[IEEE80211_BAND_2GHZ] =
-		    &rt2x00dev->bands[IEEE80211_BAND_2GHZ];
-		memcpy(&rt2x00dev->bands[IEEE80211_BAND_2GHZ].ht_cap,
+		rt2x00dev->bands[NL80211_BAND_2GHZ].n_channels = 14;
+		rt2x00dev->bands[NL80211_BAND_2GHZ].n_bitrates = num_rates;
+		rt2x00dev->bands[NL80211_BAND_2GHZ].channels = channels;
+		rt2x00dev->bands[NL80211_BAND_2GHZ].bitrates = rates;
+		hw->wiphy->bands[NL80211_BAND_2GHZ] =
+		    &rt2x00dev->bands[NL80211_BAND_2GHZ];
+		memcpy(&rt2x00dev->bands[NL80211_BAND_2GHZ].ht_cap,
 		       &spec->ht, sizeof(spec->ht));
 	}
 
@@ -991,15 +1008,15 @@ static int rt2x00lib_probe_hw_modes(struct rt2x00_dev *rt2x00dev,
 	 * Channels: OFDM, UNII, HiperLAN2.
 	 */
 	if (spec->supported_bands & SUPPORT_BAND_5GHZ) {
-		rt2x00dev->bands[IEEE80211_BAND_5GHZ].n_channels =
+		rt2x00dev->bands[NL80211_BAND_5GHZ].n_channels =
 		    spec->num_channels - 14;
-		rt2x00dev->bands[IEEE80211_BAND_5GHZ].n_bitrates =
+		rt2x00dev->bands[NL80211_BAND_5GHZ].n_bitrates =
 		    num_rates - 4;
-		rt2x00dev->bands[IEEE80211_BAND_5GHZ].channels = &channels[14];
-		rt2x00dev->bands[IEEE80211_BAND_5GHZ].bitrates = &rates[4];
-		hw->wiphy->bands[IEEE80211_BAND_5GHZ] =
-		    &rt2x00dev->bands[IEEE80211_BAND_5GHZ];
-		memcpy(&rt2x00dev->bands[IEEE80211_BAND_5GHZ].ht_cap,
+		rt2x00dev->bands[NL80211_BAND_5GHZ].channels = &channels[14];
+		rt2x00dev->bands[NL80211_BAND_5GHZ].bitrates = &rates[4];
+		hw->wiphy->bands[NL80211_BAND_5GHZ] =
+		    &rt2x00dev->bands[NL80211_BAND_5GHZ];
+		memcpy(&rt2x00dev->bands[NL80211_BAND_5GHZ].ht_cap,
 		       &spec->ht, sizeof(spec->ht));
 	}
 
@@ -1016,11 +1033,11 @@ static void rt2x00lib_remove_hw(struct rt2x00_dev *rt2x00dev)
 	if (test_bit(DEVICE_STATE_REGISTERED_HW, &rt2x00dev->flags))
 		ieee80211_unregister_hw(rt2x00dev->hw);
 
-	if (likely(rt2x00dev->hw->wiphy->bands[IEEE80211_BAND_2GHZ])) {
-		kfree(rt2x00dev->hw->wiphy->bands[IEEE80211_BAND_2GHZ]->channels);
-		kfree(rt2x00dev->hw->wiphy->bands[IEEE80211_BAND_2GHZ]->bitrates);
-		rt2x00dev->hw->wiphy->bands[IEEE80211_BAND_2GHZ] = NULL;
-		rt2x00dev->hw->wiphy->bands[IEEE80211_BAND_5GHZ] = NULL;
+	if (likely(rt2x00dev->hw->wiphy->bands[NL80211_BAND_2GHZ])) {
+		kfree(rt2x00dev->hw->wiphy->bands[NL80211_BAND_2GHZ]->channels);
+		kfree(rt2x00dev->hw->wiphy->bands[NL80211_BAND_2GHZ]->bitrates);
+		rt2x00dev->hw->wiphy->bands[NL80211_BAND_2GHZ] = NULL;
+		rt2x00dev->hw->wiphy->bands[NL80211_BAND_5GHZ] = NULL;
 	}
 
 	kfree(rt2x00dev->spec.channels_info);
@@ -1362,11 +1379,13 @@ int rt2x00lib_probe_dev(struct rt2x00_dev *rt2x00dev)
 	if (rt2x00dev->bcn->limit > 0)
 		rt2x00dev->hw->wiphy->interface_modes |=
 		    BIT(NL80211_IFTYPE_ADHOC) |
-		    BIT(NL80211_IFTYPE_AP) |
 #ifdef CONFIG_MAC80211_MESH
 		    BIT(NL80211_IFTYPE_MESH_POINT) |
 #endif
-		    BIT(NL80211_IFTYPE_WDS);
+#ifdef CONFIG_WIRELESS_WDS
+		    BIT(NL80211_IFTYPE_WDS) |
+#endif
+		    BIT(NL80211_IFTYPE_AP);
 
 	rt2x00dev->hw->wiphy->flags |= WIPHY_FLAG_IBSS_RSN;
 
@@ -1422,11 +1441,14 @@ void rt2x00lib_remove_dev(struct rt2x00_dev *rt2x00dev)
 	cancel_work_sync(&rt2x00dev->intf_work);
 	cancel_delayed_work_sync(&rt2x00dev->autowakeup_work);
 	cancel_work_sync(&rt2x00dev->sleep_work);
+#if IS_ENABLED(CONFIG_RT2X00_LIB_USB)
 	if (rt2x00_is_usb(rt2x00dev)) {
+		usb_kill_anchored_urbs(rt2x00dev->anchor);
 		hrtimer_cancel(&rt2x00dev->txstatus_timer);
 		cancel_work_sync(&rt2x00dev->rxdone_work);
 		cancel_work_sync(&rt2x00dev->txdone_work);
 	}
+#endif
 	if (rt2x00dev->workqueue)
 		destroy_workqueue(rt2x00dev->workqueue);
 

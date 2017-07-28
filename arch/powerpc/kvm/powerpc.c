@@ -27,8 +27,10 @@
 #include <linux/slab.h>
 #include <linux/file.h>
 #include <linux/module.h>
+#include <linux/irqbypass.h>
+#include <linux/kvm_irqfd.h>
 #include <asm/cputable.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/kvm_ppc.h>
 #include <asm/tlbflush.h>
 #include <asm/cputhreads.h>
@@ -119,7 +121,7 @@ int kvmppc_prepare_to_enter(struct kvm_vcpu *vcpu)
 			continue;
 		}
 
-		__kvm_guest_enter();
+		guest_enter_irqoff();
 		return 1;
 	}
 
@@ -436,6 +438,16 @@ err_out:
 	return -EINVAL;
 }
 
+bool kvm_arch_has_vcpu_debugfs(void)
+{
+	return false;
+}
+
+int kvm_arch_create_vcpu_debugfs(struct kvm_vcpu *vcpu)
+{
+	return 0;
+}
+
 void kvm_arch_destroy_vm(struct kvm *kvm)
 {
 	unsigned int i;
@@ -524,7 +536,6 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 #ifdef CONFIG_PPC_BOOK3S_64
 	case KVM_CAP_SPAPR_TCE:
 	case KVM_CAP_SPAPR_TCE_64:
-	case KVM_CAP_PPC_ALLOC_HTAB:
 	case KVM_CAP_PPC_RTAS:
 	case KVM_CAP_PPC_FIXUP_HCALL:
 	case KVM_CAP_PPC_ENABLE_HCALL:
@@ -533,13 +544,20 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 #endif
 		r = 1;
 		break;
+
+	case KVM_CAP_PPC_ALLOC_HTAB:
+		r = hv_enabled;
+		break;
 #endif /* CONFIG_PPC_BOOK3S_64 */
 #ifdef CONFIG_KVM_BOOK3S_HV_POSSIBLE
 	case KVM_CAP_PPC_SMT:
-		if (hv_enabled)
-			r = threads_per_subcore;
-		else
-			r = 0;
+		r = 0;
+		if (hv_enabled) {
+			if (cpu_has_feature(CPU_FTR_ARCH_300))
+				r = 1;
+			else
+				r = threads_per_subcore;
+		}
 		break;
 	case KVM_CAP_PPC_RMA:
 		r = 0;
@@ -588,6 +606,10 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 		r = 1;
 		break;
 #endif
+	case KVM_CAP_PPC_HTM:
+		r = cpu_has_feature(CPU_FTR_TM_COMP) &&
+		    is_kvmppc_hv_enabled(kvm);
+		break;
 	default:
 		r = 0;
 		break;
@@ -735,6 +757,42 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu)
 #endif
 }
 
+/*
+ * irq_bypass_add_producer and irq_bypass_del_producer are only
+ * useful if the architecture supports PCI passthrough.
+ * irq_bypass_stop and irq_bypass_start are not needed and so
+ * kvm_ops are not defined for them.
+ */
+bool kvm_arch_has_irq_bypass(void)
+{
+	return ((kvmppc_hv_ops && kvmppc_hv_ops->irq_bypass_add_producer) ||
+		(kvmppc_pr_ops && kvmppc_pr_ops->irq_bypass_add_producer));
+}
+
+int kvm_arch_irq_bypass_add_producer(struct irq_bypass_consumer *cons,
+				     struct irq_bypass_producer *prod)
+{
+	struct kvm_kernel_irqfd *irqfd =
+		container_of(cons, struct kvm_kernel_irqfd, consumer);
+	struct kvm *kvm = irqfd->kvm;
+
+	if (kvm->arch.kvm_ops->irq_bypass_add_producer)
+		return kvm->arch.kvm_ops->irq_bypass_add_producer(cons, prod);
+
+	return 0;
+}
+
+void kvm_arch_irq_bypass_del_producer(struct irq_bypass_consumer *cons,
+				      struct irq_bypass_producer *prod)
+{
+	struct kvm_kernel_irqfd *irqfd =
+		container_of(cons, struct kvm_kernel_irqfd, consumer);
+	struct kvm *kvm = irqfd->kvm;
+
+	if (kvm->arch.kvm_ops->irq_bypass_del_producer)
+		kvm->arch.kvm_ops->irq_bypass_del_producer(cons, prod);
+}
+
 static void kvmppc_complete_mmio_load(struct kvm_vcpu *vcpu,
                                       struct kvm_run *run)
 {
@@ -800,9 +858,9 @@ static void kvmppc_complete_mmio_load(struct kvm_vcpu *vcpu,
 	}
 }
 
-int kvmppc_handle_load(struct kvm_run *run, struct kvm_vcpu *vcpu,
-		       unsigned int rt, unsigned int bytes,
-		       int is_default_endian)
+static int __kvmppc_handle_load(struct kvm_run *run, struct kvm_vcpu *vcpu,
+				unsigned int rt, unsigned int bytes,
+				int is_default_endian, int sign_extend)
 {
 	int idx, ret;
 	bool host_swabbed;
@@ -827,7 +885,7 @@ int kvmppc_handle_load(struct kvm_run *run, struct kvm_vcpu *vcpu,
 	vcpu->arch.mmio_host_swabbed = host_swabbed;
 	vcpu->mmio_needed = 1;
 	vcpu->mmio_is_write = 0;
-	vcpu->arch.mmio_sign_extend = 0;
+	vcpu->arch.mmio_sign_extend = sign_extend;
 
 	idx = srcu_read_lock(&vcpu->kvm->srcu);
 
@@ -844,6 +902,13 @@ int kvmppc_handle_load(struct kvm_run *run, struct kvm_vcpu *vcpu,
 
 	return EMULATE_DO_MMIO;
 }
+
+int kvmppc_handle_load(struct kvm_run *run, struct kvm_vcpu *vcpu,
+		       unsigned int rt, unsigned int bytes,
+		       int is_default_endian)
+{
+	return __kvmppc_handle_load(run, vcpu, rt, bytes, is_default_endian, 0);
+}
 EXPORT_SYMBOL_GPL(kvmppc_handle_load);
 
 /* Same as above, but sign extends */
@@ -851,12 +916,7 @@ int kvmppc_handle_loads(struct kvm_run *run, struct kvm_vcpu *vcpu,
 			unsigned int rt, unsigned int bytes,
 			int is_default_endian)
 {
-	int r;
-
-	vcpu->arch.mmio_sign_extend = 1;
-	r = kvmppc_handle_load(run, vcpu, rt, bytes, is_default_endian);
-
-	return r;
+	return __kvmppc_handle_load(run, vcpu, rt, bytes, is_default_endian, 1);
 }
 
 int kvmppc_handle_store(struct kvm_run *run, struct kvm_vcpu *vcpu,
@@ -1159,6 +1219,19 @@ static int kvm_vcpu_ioctl_enable_cap(struct kvm_vcpu *vcpu,
 		r = kvmppc_sanity_check(vcpu);
 
 	return r;
+}
+
+bool kvm_arch_intc_initialized(struct kvm *kvm)
+{
+#ifdef CONFIG_KVM_MPIC
+	if (kvm->arch.mpic)
+		return true;
+#endif
+#ifdef CONFIG_KVM_XICS
+	if (kvm->arch.xics)
+		return true;
+#endif
+	return false;
 }
 
 int kvm_arch_vcpu_ioctl_get_mpstate(struct kvm_vcpu *vcpu,

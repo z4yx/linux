@@ -54,6 +54,7 @@ struct intel_th_output {
  * @num_resources:	number of resources in @resource array
  * @type:		INTEL_TH_{SOURCE,OUTPUT,SWITCH}
  * @id:			device instance or -1
+ * @host_mode:		Intel TH is controlled by an external debug host
  * @output:		output descriptor for INTEL_TH_OUTPUT devices
  * @name:		device name to match the driver
  */
@@ -63,6 +64,9 @@ struct intel_th_device {
 	unsigned int	num_resources;
 	unsigned int	type;
 	int		id;
+
+	/* INTEL_TH_SWITCH specific */
+	bool			host_mode;
 
 	/* INTEL_TH_OUTPUT specific */
 	struct intel_th_output	output;
@@ -114,7 +118,11 @@ intel_th_output_assigned(struct intel_th_device *thdev)
  * @unassign:	deassociate an output type device from an output port
  * @enable:	enable tracing for a given output device
  * @disable:	disable tracing for a given output device
+ * @irq:	interrupt callback
+ * @activate:	enable tracing on the output's side
+ * @deactivate:	disable tracing on the output's side
  * @fops:	file operations for device nodes
+ * @attr_group:	attributes provided by the driver
  *
  * Callbacks @probe and @remove are required for all device types.
  * Switch device driver needs to fill in @assign, @enable and @disable
@@ -139,6 +147,8 @@ struct intel_th_driver {
 	void			(*deactivate)(struct intel_th_device *thdev);
 	/* file_operations for those who want a device node */
 	const struct file_operations *fops;
+	/* optional attributes */
+	struct attribute_group	*attr_group;
 
 	/* source ops */
 	int			(*set_output)(struct intel_th_device *thdev,
@@ -147,6 +157,9 @@ struct intel_th_driver {
 
 #define to_intel_th_driver(_d)					\
 	container_of((_d), struct intel_th_driver, driver)
+
+#define to_intel_th_driver_or_null(_d)		\
+	((_d) ? to_intel_th_driver(_d) : NULL)
 
 static inline struct intel_th_device *
 to_intel_th_hub(struct intel_th_device *thdev)
@@ -199,6 +212,9 @@ struct intel_th {
 
 	int			id;
 	int			major;
+#ifdef CONFIG_MODULES
+	struct work_struct	request_module_work;
+#endif /* CONFIG_MODULES */
 #ifdef CONFIG_INTEL_TH_DEBUG
 	struct dentry		*dbg;
 #endif

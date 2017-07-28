@@ -176,12 +176,7 @@ struct inode *ocfs2_iget(struct ocfs2_super *osb, u64 blkno, unsigned flags,
 	}
 	if (is_bad_inode(inode)) {
 		iput(inode);
-		if ((flags & OCFS2_FI_FLAG_FILECHECK_CHK) ||
-		    (flags & OCFS2_FI_FLAG_FILECHECK_FIX))
-			/* Return OCFS2_FILECHECK_ERR_XXX related errno */
-			inode = ERR_PTR(rc);
-		else
-			inode = ERR_PTR(-ESTALE);
+		inode = ERR_PTR(rc);
 		goto bail;
 	}
 
@@ -262,7 +257,7 @@ static int ocfs2_init_locked_inode(struct inode *inode, void *opaque)
 	inode->i_ino = args->fi_ino;
 	OCFS2_I(inode)->ip_blkno = args->fi_blkno;
 	if (args->fi_sysfile_type != 0)
-		lockdep_set_class(&inode->i_mutex,
+		lockdep_set_class(&inode->i_rwsem,
 			&ocfs2_sysfile_lock_key[args->fi_sysfile_type]);
 	if (args->fi_sysfile_type == USER_QUOTA_SYSTEM_INODE ||
 	    args->fi_sysfile_type == GROUP_QUOTA_SYSTEM_INODE ||
@@ -708,7 +703,7 @@ static int ocfs2_remove_inode(struct inode *inode,
 		goto bail_commit;
 	}
 
-	di->i_dtime = cpu_to_le64(CURRENT_TIME.tv_sec);
+	di->i_dtime = cpu_to_le64(ktime_get_real_seconds());
 	di->i_flags &= cpu_to_le32(~(OCFS2_VALID_FL | OCFS2_ORPHANED_FL));
 	ocfs2_journal_dirty(handle, di_bh);
 

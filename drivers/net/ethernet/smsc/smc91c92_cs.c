@@ -52,7 +52,7 @@
 #include <pcmcia/ss.h>
 
 #include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 /*====================================================================*/
 
@@ -294,7 +294,6 @@ static const struct net_device_ops smc_netdev_ops = {
 	.ndo_set_config 	= s9k_config,
 	.ndo_set_rx_mode	= set_rx_mode,
 	.ndo_do_ioctl		= smc_ioctl,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -1172,7 +1171,7 @@ static void smc_hardware_send_packet(struct net_device * dev)
 
     smc->saved_skb = NULL;
     dev_kfree_skb_irq(skb);
-    dev->trans_start = jiffies;
+    netif_trans_update(dev);
     netif_start_queue(dev);
 }
 
@@ -1187,7 +1186,7 @@ static void smc_tx_timeout(struct net_device *dev)
 		  inw(ioaddr)&0xff, inw(ioaddr + 2));
     dev->stats.tx_errors++;
     smc_reset(dev);
-    dev->trans_start = jiffies; /* prevent tx timeout */
+    netif_trans_update(dev); /* prevent tx timeout */
     smc->saved_skb = NULL;
     netif_wake_queue(dev);
 }

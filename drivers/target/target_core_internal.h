@@ -1,6 +1,11 @@
 #ifndef TARGET_CORE_INTERNAL_H
 #define TARGET_CORE_INTERNAL_H
 
+#include <linux/configfs.h>
+#include <linux/list.h>
+#include <linux/types.h>
+#include <target/target_core_base.h>
+
 #define TARGET_CORE_NAME_MAX_LEN	64
 #define TARGET_FABRIC_NAME_SIZE		32
 
@@ -146,6 +151,7 @@ sense_reason_t	target_cmd_size_check(struct se_cmd *cmd, unsigned int size);
 void	target_qf_do_work(struct work_struct *work);
 bool	target_check_wce(struct se_device *dev);
 bool	target_check_fua(struct se_device *dev);
+void	__target_execute_cmd(struct se_cmd *, bool);
 
 /* target_core_stat.c */
 void	target_stat_setup_dev_default_groups(struct se_device *);
@@ -154,5 +160,11 @@ void	target_stat_setup_mappedlun_default_groups(struct se_lun_acl *);
 
 /* target_core_xcopy.c */
 extern struct se_portal_group xcopy_pt_tpg;
+
+/* target_core_configfs.c */
+#define DB_ROOT_LEN		4096
+#define	DB_ROOT_DEFAULT		"/var/target"
+
+extern char db_root[];
 
 #endif /* TARGET_CORE_INTERNAL_H */
