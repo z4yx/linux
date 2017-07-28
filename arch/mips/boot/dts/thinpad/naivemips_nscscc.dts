@@ -8,7 +8,7 @@
 	#size-cells = <1>;
 
 	chosen {
-		bootargs = "cca=0 console=ttyS0,115200n8 rdinit=/sbin/init uio_pdrv_genirq.of_id=lcd";
+		bootargs = "cca=0 console=ttyS0,115200n8 rdinit=/sbin/init uio_pdrv_genirq.of_id=lcd debug";
 	};
 
 	cpus {
@@ -85,18 +85,15 @@
 			reg = <0x1e000000 0x10000>;
 			xlnx,num-ss-bits = <0x1>;
 		};
-		altr_intc: altr_intc@1c070000 {
-			compatible = "altr,pio-1.0";
-			reg = <0x1c070000 0x1000>;
-			altr,ngpio = <32>;
-			resetvalue = <0>;
-			#gpio-cells = <2>;
-			gpio-controller;
-			interrupt-parent = <&cpuintc>;
-			interrupts = <2>;
-			altr,interrupt-type = <IRQ_TYPE_EDGE_RISING>;
-			interrupt-controller;
+		axi_intc_0: interrupt-controller@1c080000 {
 			#interrupt-cells = <2>;
+			compatible = "xlnx,xps-intc-1.00.a";
+			interrupt-controller;
+			interrupt-parent = <&cpuintc>;
+			interrupts = <5>;
+			reg = <0x1c080000 0x1000>;
+			xlnx,kind-of-intr = <0x1>;
+			xlnx,num-intr-inputs = <0x1>;
 		};
 		axi_ethernetlite: ethernet@1c030000 {
 			compatible = "xlnx,xps-ethernetlite-3.00.a";
@@ -113,8 +110,8 @@
 			xlnx,s-axi-id-width = <0x1>;
 			xlnx,tx-ping-pong = <0x1>;
 			xlnx,use-internal = <0x0>;
-			interrupt-parent = <&altr_intc>;
-			interrupts = <0 IRQ_TYPE_EDGE_RISING>;
+			interrupt-parent = <&axi_intc_0>;
+			interrupts = <0 2>; //the 2nd value is not used
 			mdio {
 				#address-cells = <1>;
 				#size-cells = <0>;
