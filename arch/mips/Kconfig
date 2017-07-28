@@ -1015,6 +1015,7 @@ config MACH_THINPAD
 	select PINCTRL
 	select ARCH_WANT_OPTIONAL_GPIOLIB
 	select USE_OF
+	select XILINX_INTC
 	help
 	  This enables support for the Tsinghua University Thinpad platform.
 endchoice

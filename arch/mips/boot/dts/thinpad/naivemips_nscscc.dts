@@ -48,7 +48,7 @@
 		
 		serial0: serial@0xbfd03000 {
 			device_type = "serial";
-			compatible = "ns16550a";
+			compatible = "xlnx,xps-uart16550-2.00.a", "ns16550a";
 			reg = <0x1fd03000 0x1000>;
 			reg-io-width = <4>;
 			reg-shift = <2>;
@@ -98,6 +98,16 @@
 			interrupt-controller;
 			#interrupt-cells = <2>;
 		};
+		axi_intc_0: interrupt-controller@1c080000 {
+			#interrupt-cells = <2>;
+			compatible = "xlnx,xps-intc-1.00.a";
+			interrupt-controller;
+			interrupt-parent = <&cpuintc>;
+			interrupts = <5>;
+			reg = <0x1c080000 0x1000>;
+			xlnx,kind-of-intr = <0x1>;
+			xlnx,num-intr-inputs = <0x1>;
+		};
 		axi_ethernetlite: ethernet@1c030000 {
 			compatible = "xlnx,xps-ethernetlite-3.00.a";
 			device_type = "network";
@@ -113,7 +123,7 @@
 			xlnx,s-axi-id-width = <0x1>;
 			xlnx,tx-ping-pong = <0x1>;
 			xlnx,use-internal = <0x0>;
-			interrupt-parent = <&altr_intc>;
+			interrupt-parent = <&axi_intc_0>;
 			interrupts = <0 IRQ_TYPE_EDGE_RISING>;
 			mdio {
 				#address-cells = <1>;
