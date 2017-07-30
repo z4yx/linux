@@ -90,10 +90,11 @@
 			fifo-size = <256>;
 
 			flash@0 {
-				compatible = "m25p80", "jedec,spi-nor";
+				compatible = "w25q128", "jedec,spi-nor";
 				reg = <0x0>;
-				spi-max-frequency = <50000000>;
+				spi-max-frequency = <30000000>;
 
+				spi-rx-bus-width = <4>;
 				m25p,fast-read;
 
 				partitions {
@@ -102,8 +103,12 @@
 					#size-cells = <1>;
 
 					partition@0 {
-						label = "spi-full";
-						reg = <0x0 0x100000>;
+						label = "kernel";
+						reg = <0x0 0xa00000>;
+					};
+					partition@fff000 {
+						label = "bootenv";
+						reg = <0xfff000 0x1000>;
 					};
 				};
 			};
