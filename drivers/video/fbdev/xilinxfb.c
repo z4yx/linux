@@ -410,10 +410,10 @@ static int xilinxfb_release(struct device *dev)
 
 static int xilinxfb_of_probe(struct platform_device *pdev)
 {
-	const u32 *prop;
+	u32 prop[2];
+	int rc;
 	u32 tft_access = 0;
 	struct xilinxfb_platform_data pdata;
-	int size;
 	struct xilinxfb_drvdata *drvdata;
 
 	/* Copy with the default pdata (not a ptr reference!) */
@@ -451,20 +451,20 @@ static int xilinxfb_of_probe(struct platform_device *pdev)
 	}
 #endif
 
-	prop = of_get_property(pdev->dev.of_node, "phys-size", &size);
-	if ((prop) && (size >= sizeof(u32)*2)) {
+	rc = of_property_read_u32_array(pdev->dev.of_node, "phys-size", prop, 2);
+	if (rc == 0) {
 		pdata.screen_width_mm = prop[0];
 		pdata.screen_height_mm = prop[1];
 	}
 
-	prop = of_get_property(pdev->dev.of_node, "resolution", &size);
-	if ((prop) && (size >= sizeof(u32)*2)) {
+	rc = of_property_read_u32_array(pdev->dev.of_node, "resolution", prop, 2);
+	if (rc == 0) {
 		pdata.xres = prop[0];
 		pdata.yres = prop[1];
 	}
 
-	prop = of_get_property(pdev->dev.of_node, "virtual-resolution", &size);
-	if ((prop) && (size >= sizeof(u32)*2)) {
+	rc = of_property_read_u32_array(pdev->dev.of_node, "virtual-resolution", prop, 2);
+	if (rc == 0) {
 		pdata.xvirt = prop[0];
 		pdata.yvirt = prop[1];
 	}
