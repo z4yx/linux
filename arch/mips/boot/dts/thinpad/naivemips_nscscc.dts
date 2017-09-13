@@ -123,6 +123,17 @@
 			xlnx,kind-of-intr = <0x1>;
 			xlnx,num-intr-inputs = <0x1>;
 		};
+		axi_tft_0: axi_tft@1c061000 {
+			compatible = "xlnx,xps-tft-1.00.a";
+			//interrupt-parent = <&axi_intc>;
+			//interrupts = <1 0>;
+			reg = <0x1c061000 0x1000>;
+			xlnx,dcr-splb-slave-if = <0x1>;
+			resolution = <640 480>;
+			virtual-resolution = <1024 480>;
+			phys-size = <1024 512>;
+			//rotate-display;
+		};
 		axi_ethernetlite: ethernet@1c030000 {
 			compatible = "xlnx,xps-ethernetlite-3.00.a";
 			device_type = "network";
