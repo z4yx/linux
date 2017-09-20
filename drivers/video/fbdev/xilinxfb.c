@@ -34,6 +34,7 @@
 #include <linux/of_address.h>
 #include <linux/io.h>
 #include <linux/slab.h>
+#include <asm/delay.h>
 
 #ifdef CONFIG_PPC_DCR
 #include <asm/dcr.h>
@@ -154,6 +155,13 @@ struct xilinxfb_drvdata {
 
 	u32		pseudo_palette[PALETTE_ENTRIES_NO];
 					/* Fake palette of 16 colors */
+	phys_addr_t reg_dma_wr_phys;
+	void __iomem *reg_dma_wr;
+
+	phys_addr_t reg_dma_rd_phys;
+	void __iomem *reg_dma_rd;
+
+	int dma_en;
 };
 
 #define to_xilinxfb_drvdata(_info) \
@@ -192,6 +200,128 @@ static u32 xilinx_fb_in32(struct xilinxfb_drvdata *drvdata, u32 offset)
 		return dcr_read(drvdata->dcr_host, offset);
 #endif
 	return 0;
+}
+
+#define XILINX_FBMBUF_WR			0x1
+#define XILINX_FBMBUF_RD			0x0
+
+/* Register/Descriptor Offsets */
+#define XILINX_FRMBUF_CTRL_OFFSET		0x00
+#define XILINX_FRMBUF_GIE_OFFSET		0x01
+#define XILINX_FRMBUF_IE_OFFSET			0x02
+#define XILINX_FRMBUF_ISR_OFFSET		0x03
+#define XILINX_FRMBUF_WIDTH_OFFSET		0x04
+#define XILINX_FRMBUF_HEIGHT_OFFSET		0x06
+#define XILINX_FRMBUF_STRIDE_OFFSET		0x08
+#define XILINX_FRMBUF_FMT_OFFSET		0x0a
+#define XILINX_FRMBUF_ADDR_OFFSET		0x0c
+
+/* Control Registers */
+#define XILINX_FRMBUF_CTRL_AP_START		BIT(0)
+#define XILINX_FRMBUF_CTRL_AP_DONE		BIT(1)
+#define XILINX_FRMBUF_CTRL_AP_IDLE		BIT(2)
+#define XILINX_FRMBUF_CTRL_AP_READY		BIT(3)
+#define XILINX_FRMBUF_CTRL_AUTO_RESTART		BIT(7)
+#define XILINX_FRMBUF_GIE_EN			BIT(0)
+
+/* Interrupt Status and Control */
+#define XILINX_FRMBUF_IE_AP_DONE		BIT(0)
+#define XILINX_FRMBUF_IE_AP_READY		BIT(1)
+
+#define XILINX_FRMBUF_ISR_AP_DONE_IRQ		BIT(0)
+#define XILINX_FRMBUF_ISR_AP_READY_IRQ		BIT(1)
+
+#define XILINX_FRMBUF_FMT_RGBX8 10
+
+#define XILINX_FRMBUF_ISR_ALL_IRQ_MASK	\
+		(XILINX_FRMBUF_ISR_AP_DONE_IRQ | \
+		XILINX_FRMBUF_ISR_AP_READY_IRQ)
+
+static void xilinx_dma_out32(struct xilinxfb_drvdata *drvdata, u32 offset,
+				u32 val, int rdOrWr)
+{
+	if (drvdata->flags & BUS_ACCESS_FLAG) {
+		if (drvdata->flags & LITTLE_ENDIAN_ACCESS)
+			iowrite32(val, (rdOrWr == XILINX_FBMBUF_RD ? drvdata->reg_dma_rd :
+				drvdata->reg_dma_wr) + (offset << 2));
+		else
+			iowrite32be(val, (rdOrWr == XILINX_FBMBUF_RD ? drvdata->reg_dma_rd :
+				drvdata->reg_dma_wr) + (offset << 2));
+	}
+}
+
+static u32 xilinx_dma_in32(struct xilinxfb_drvdata *drvdata, u32 offset, int rdOrWr)
+{
+	if (drvdata->flags & BUS_ACCESS_FLAG) {
+		if (drvdata->flags & LITTLE_ENDIAN_ACCESS)
+			return ioread32((rdOrWr == XILINX_FBMBUF_RD ? drvdata->reg_dma_rd :
+				drvdata->reg_dma_wr) + (offset << 2));
+		else
+			return ioread32be((rdOrWr == XILINX_FBMBUF_RD ? drvdata->reg_dma_rd :
+				drvdata->reg_dma_wr) + (offset << 2));
+	}
+	return 0;
+}
+
+static inline void xilinx_dma_clr(struct xilinxfb_drvdata *drvdata, u32 offset,
+			      u32 clr, int rdOrWr)
+{
+	xilinx_dma_out32(drvdata, offset, xilinx_dma_in32(drvdata, offset, rdOrWr) & ~clr, rdOrWr);
+}
+
+static inline void xilinx_dma_set(struct xilinxfb_drvdata *drvdata, u32 offset,
+			      u32 set, int rdOrWr)
+{
+	xilinx_dma_out32(drvdata, offset, xilinx_dma_in32(drvdata, offset, rdOrWr) | set, rdOrWr);
+}
+
+static void dma_cparea(struct fb_info *p, const struct fb_copyarea *area){
+	struct xilinxfb_drvdata *drvdata = to_xilinxfb_drvdata(p);
+	u32 dx = area->dx, dy = area->dy, sx = area->sx, sy = area->sy;
+	u32 height = area->height, width = area->width;
+	dma_addr_t base, dst, src;
+	int retry_times;
+
+	if (!drvdata->dma_en){
+		return cfb_copyarea(p, area);
+	}
+	/* Wait for last transfer finish */
+	retry_times = 10000000;
+	while (retry_times --> 0) {
+		if((xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET,
+			  XILINX_FBMBUF_RD) & XILINX_FRMBUF_CTRL_AP_READY) &&
+	     (xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET,
+ 			  XILINX_FBMBUF_WR) & XILINX_FRMBUF_CTRL_AP_READY)){
+			break;
+		}
+		udelay(1);
+	}
+	if (retry_times == 0) {
+		pr_warning("lockup - turning off hardware acceleration\n");
+		drvdata->dma_en = 0;
+		return cfb_copyarea(p, area);
+	}
+	/* if the beginning of the target area might overlap with the end of
+	the source area, be have to copy the area reverse. */
+	if ((dy == sy && dx > sx) || (dy > sy)) {
+		dy += height;
+		sy += height;
+		return cfb_copyarea(p, area);
+	}
+	base = drvdata->fb_phys;
+	src = base + (p->fix.line_length) * sy + BYTES_PER_PIXEL * sx;
+	dst = base + (p->fix.line_length) * dy + BYTES_PER_PIXEL * dx;
+	xilinx_dma_out32(drvdata, XILINX_FRMBUF_ADDR_OFFSET, src, XILINX_FBMBUF_RD);
+	xilinx_dma_out32(drvdata, XILINX_FRMBUF_ADDR_OFFSET, dst, XILINX_FBMBUF_WR);
+	xilinx_dma_out32(drvdata, XILINX_FRMBUF_WIDTH_OFFSET, width, XILINX_FBMBUF_RD);
+	xilinx_dma_out32(drvdata, XILINX_FRMBUF_WIDTH_OFFSET, width, XILINX_FBMBUF_WR);
+	xilinx_dma_out32(drvdata, XILINX_FRMBUF_HEIGHT_OFFSET, height, XILINX_FBMBUF_RD);
+	xilinx_dma_out32(drvdata, XILINX_FRMBUF_HEIGHT_OFFSET, height, XILINX_FBMBUF_WR);
+	xilinx_dma_out32(drvdata, XILINX_FRMBUF_STRIDE_OFFSET, p->fix.line_length, XILINX_FBMBUF_RD);
+	xilinx_dma_out32(drvdata, XILINX_FRMBUF_STRIDE_OFFSET, p->fix.line_length, XILINX_FBMBUF_WR);
+
+	xilinx_dma_set(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FRMBUF_CTRL_AP_START, XILINX_FBMBUF_RD);
+	xilinx_dma_set(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FRMBUF_CTRL_AP_START, XILINX_FBMBUF_WR);
 }
 
 static int
@@ -277,6 +407,35 @@ static int xilinxfb_assign(struct platform_device *pdev,
 			return PTR_ERR(drvdata->regs);
 
 		drvdata->regs_phys = res->start;
+
+		int dma_succ = 0;
+		res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+		if(res){
+			drvdata->reg_dma_rd = devm_ioremap_resource(&pdev->dev, res);
+			if (!IS_ERR(drvdata->reg_dma_rd)){
+				drvdata->reg_dma_rd_phys = res->start;
+				dma_succ += 1;
+			}
+		}
+
+		res = platform_get_resource(pdev, IORESOURCE_MEM, 2);
+		if(res){
+			drvdata->reg_dma_wr = devm_ioremap_resource(&pdev->dev, res);
+			if (!IS_ERR(drvdata->reg_dma_wr)){
+				drvdata->reg_dma_wr_phys = res->start;
+				dma_succ += 2;
+			}
+		}
+
+		if(dma_succ != 1 + 2){
+			pr_warning("dma ioremap error, succ=%x\n", dma_succ);
+			pr_warning("dma disabled\n");
+			drvdata->reg_dma_rd_phys = drvdata->reg_dma_wr_phys = 0;
+			drvdata->reg_dma_wr = drvdata->reg_dma_rd = NULL;
+			drvdata->dma_en = 0;
+		}else{
+			drvdata->dma_en = 1;
+		}
 	}
 
 	/* Allocate the framebuffer memory */
@@ -317,6 +476,10 @@ static int xilinxfb_assign(struct platform_device *pdev,
 	drvdata->info.device = dev;
 	drvdata->info.screen_base = (void __iomem *)drvdata->fb_virt;
 	drvdata->info.fbops = &xilinxfb_ops;
+	if(drvdata->dma_en){
+		dev_dbg(dev, "fb: dma enabled\n");
+		xilinxfb_ops.fb_copyarea = dma_cparea;
+	}
 	drvdata->info.fix = xilinx_fb_fix;
 	drvdata->info.fix.smem_start = drvdata->fb_phys;
 	drvdata->info.fix.smem_len = fbsize;
@@ -355,6 +518,24 @@ static int xilinxfb_assign(struct platform_device *pdev,
 	/* Put a banner in the log (for DEBUG) */
 	dev_dbg(dev, "fb: phys=%llx, virt=%p, size=%x\n",
 		(unsigned long long)drvdata->fb_phys, drvdata->fb_virt, fbsize);
+
+	xilinx_dma_clr(drvdata, XILINX_FRMBUF_CTRL_OFFSET,
+		XILINX_FRMBUF_CTRL_AUTO_RESTART, XILINX_FBMBUF_RD);
+	xilinx_dma_clr(drvdata, XILINX_FRMBUF_CTRL_OFFSET,
+		XILINX_FRMBUF_CTRL_AUTO_RESTART, XILINX_FBMBUF_WR);
+	xilinx_dma_clr(drvdata, XILINX_FRMBUF_GIE_OFFSET,
+		XILINX_FRMBUF_GIE_EN, XILINX_FBMBUF_RD);
+	xilinx_dma_clr(drvdata, XILINX_FRMBUF_GIE_OFFSET,
+		XILINX_FRMBUF_GIE_EN, XILINX_FBMBUF_WR);
+	xilinx_dma_out32(drvdata, XILINX_FRMBUF_FMT_OFFSET,
+			XILINX_FRMBUF_FMT_RGBX8, XILINX_FBMBUF_RD);
+	xilinx_dma_out32(drvdata, XILINX_FRMBUF_FMT_OFFSET,
+			XILINX_FRMBUF_FMT_RGBX8, XILINX_FBMBUF_WR);
+
+	dev_dbg(dev, "fb: dma_rd: phys=%llx, virt=%p\n",
+		(unsigned long long)drvdata->reg_dma_rd_phys, drvdata->reg_dma_rd);
+	dev_dbg(dev, "fb: dma_wr: phys=%llx, virt=%p\n",
+		(unsigned long long)drvdata->reg_dma_wr_phys, drvdata->reg_dma_wr);
 
 	return 0;	/* success */
 
