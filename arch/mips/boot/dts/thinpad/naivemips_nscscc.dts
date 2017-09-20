@@ -8,7 +8,9 @@
 	#size-cells = <1>;
 
 	chosen {
-		bootargs = "cca=0 console=ttyS0,115200n8 rdinit=/sbin/init uio_pdrv_genirq.of_id=lcd";
+		// bootargs = "cca=0 console=ttyS0,115200n8 rdinit=/sbin/init";
+		// bootargs = "cca=0 console=ttyS0,115200n8 rootfstype=jffs2 root=/dev/mtdblock1";
+		bootargs = "cca=0 console=ttyS0,115200n8 rootfstype=squashfs root=/dev/mtdblock1";
 	};
 
 	cpus {
@@ -90,7 +92,7 @@
 			fifo-size = <256>;
 
 			flash@0 {
-				compatible = "w25q128", "jedec,spi-nor";
+				compatible = "mx25l25635f", "jedec,spi-nor";
 				reg = <0x0>;
 				spi-max-frequency = <30000000>;
 
@@ -103,13 +105,21 @@
 					#size-cells = <1>;
 
 					partition@0 {
-						label = "kernel";
-						reg = <0x0 0xa00000>;
-					};
-					partition@fff000 {
 						label = "bootenv";
-						reg = <0xfff000 0x1000>;
+						reg = <0x0 0x10000>;
 					};
+					partition@10000 {
+						label = "rootfs";
+						reg = <0x10000 0xff0000>;
+					};
+					// partition@10000 {
+					// 	label = "kernel";
+					// 	reg = <0x10000 0x5f0000>;
+					// };
+					// partition@600000 {
+					// 	label = "rootfs";
+					// 	reg = <0x600000 0x1a00000>;
+					// };
 				};
 			};
 		};
@@ -127,7 +137,7 @@
 			compatible = "xlnx,xps-tft-1.00.a";
 			//interrupt-parent = <&axi_intc>;
 			//interrupts = <1 0>;
-			reg = <0x1c061000 0x1000>;
+			reg = <0x1c090000 0x1000>;
 			xlnx,dcr-splb-slave-if = <0x1>;
 			resolution = <640 480>;
 			virtual-resolution = <1024 480>;
@@ -160,11 +170,17 @@
 				} ;
 			} ;
 	    } ;
+		ps2: ps2@0x1c062000 {
+			compatible = "altr,ps2-1.0";
+			reg = <0x1c062000 0x1000>;
+			interrupt-parent = <&cpuintc>;
+			interrupts = <6>;
+		};
 	};
 
 	
 };
 
 &ext {
-	clock-frequency = <40000000>;
+	clock-frequency = <50000000>;
 };
