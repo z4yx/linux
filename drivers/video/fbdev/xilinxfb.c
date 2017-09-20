@@ -275,6 +275,7 @@ static inline void xilinx_dma_set(struct xilinxfb_drvdata *drvdata, u32 offset,
 	xilinx_dma_out32(drvdata, offset, xilinx_dma_in32(drvdata, offset, rdOrWr) | set, rdOrWr);
 }
 
+static int enter_times, exit_times;
 static void dma_cparea(struct fb_info *p, const struct fb_copyarea *area){
 	struct xilinxfb_drvdata *drvdata = to_xilinxfb_drvdata(p);
 	u32 dx = area->dx, dy = area->dy, sx = area->sx, sy = area->sy;
@@ -282,30 +283,36 @@ static void dma_cparea(struct fb_info *p, const struct fb_copyarea *area){
 	dma_addr_t base, dst, src;
 	int retry_times;
 
+	if(enter_times%16 == 0){
+		//pr_info("times %d %d\n", enter_times, exit_times);
+	}
+	enter_times++;
 	if (!drvdata->dma_en){
 		return cfb_copyarea(p, area);
 	}
 	/* Wait for last transfer finish */
-	retry_times = 10000000;
-	while (retry_times --> 0) {
+	retry_times = 1000000;
+	while (--retry_times > 0) {
 		if((xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET,
-			  XILINX_FBMBUF_RD) & XILINX_FRMBUF_CTRL_AP_READY) &&
+			  XILINX_FBMBUF_RD) & XILINX_FRMBUF_CTRL_AP_IDLE) &&
 	     (xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET,
- 			  XILINX_FBMBUF_WR) & XILINX_FRMBUF_CTRL_AP_READY)){
+ 			  XILINX_FBMBUF_WR) & XILINX_FRMBUF_CTRL_AP_IDLE)){
 			break;
 		}
 		udelay(1);
 	}
 	if (retry_times == 0) {
 		pr_warning("lockup - turning off hardware acceleration\n");
+		pr_warning("rd_ctl=%x; wr_ctl=%x", 
+			xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FBMBUF_RD),
+			xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FBMBUF_WR)
+		);
 		drvdata->dma_en = 0;
 		return cfb_copyarea(p, area);
 	}
 	/* if the beginning of the target area might overlap with the end of
 	the source area, be have to copy the area reverse. */
 	if ((dy == sy && dx > sx) || (dy > sy)) {
-		dy += height;
-		sy += height;
 		return cfb_copyarea(p, area);
 	}
 	base = drvdata->fb_phys;
@@ -319,9 +326,10 @@ static void dma_cparea(struct fb_info *p, const struct fb_copyarea *area){
 	xilinx_dma_out32(drvdata, XILINX_FRMBUF_HEIGHT_OFFSET, height, XILINX_FBMBUF_WR);
 	xilinx_dma_out32(drvdata, XILINX_FRMBUF_STRIDE_OFFSET, p->fix.line_length, XILINX_FBMBUF_RD);
 	xilinx_dma_out32(drvdata, XILINX_FRMBUF_STRIDE_OFFSET, p->fix.line_length, XILINX_FBMBUF_WR);
-
+	
 	xilinx_dma_set(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FRMBUF_CTRL_AP_START, XILINX_FBMBUF_RD);
 	xilinx_dma_set(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FRMBUF_CTRL_AP_START, XILINX_FBMBUF_WR);
+	exit_times++;
 }
 
 static int
@@ -434,7 +442,7 @@ static int xilinxfb_assign(struct platform_device *pdev,
 			drvdata->reg_dma_wr = drvdata->reg_dma_rd = NULL;
 			drvdata->dma_en = 0;
 		}else{
-			drvdata->dma_en = 1;
+			drvdata->dma_en = 0;
 		}
 	}
 
@@ -477,7 +485,7 @@ static int xilinxfb_assign(struct platform_device *pdev,
 	drvdata->info.screen_base = (void __iomem *)drvdata->fb_virt;
 	drvdata->info.fbops = &xilinxfb_ops;
 	if(drvdata->dma_en){
-		dev_dbg(dev, "fb: dma enabled\n");
+		pr_info("fb: dma enabled\n");
 		xilinxfb_ops.fb_copyarea = dma_cparea;
 	}
 	drvdata->info.fix = xilinx_fb_fix;
@@ -486,7 +494,7 @@ static int xilinxfb_assign(struct platform_device *pdev,
 	drvdata->info.fix.line_length = pdata->xvirt * BYTES_PER_PIXEL;
 
 	drvdata->info.pseudo_palette = drvdata->pseudo_palette;
-	drvdata->info.flags = FBINFO_DEFAULT;
+	drvdata->info.flags = FBINFO_DEFAULT | FBINFO_HWACCEL_COPYAREA | FBINFO_MODULE;
 	drvdata->info.var = xilinx_fb_var;
 	drvdata->info.var.height = pdata->screen_height_mm;
 	drvdata->info.var.width = pdata->screen_width_mm;
@@ -532,10 +540,11 @@ static int xilinxfb_assign(struct platform_device *pdev,
 	xilinx_dma_out32(drvdata, XILINX_FRMBUF_FMT_OFFSET,
 			XILINX_FRMBUF_FMT_RGBX8, XILINX_FBMBUF_WR);
 
-	dev_dbg(dev, "fb: dma_rd: phys=%llx, virt=%p\n",
+	pr_info( "fb: dma_rd: phys=%llx, virt=%p\n",
 		(unsigned long long)drvdata->reg_dma_rd_phys, drvdata->reg_dma_rd);
-	dev_dbg(dev, "fb: dma_wr: phys=%llx, virt=%p\n",
+	pr_info( "fb: dma_wr: phys=%llx, virt=%p\n",
 		(unsigned long long)drvdata->reg_dma_wr_phys, drvdata->reg_dma_wr);
+	pr_info("dma_cparea=%p\n",dma_cparea);
 
 	return 0;	/* success */
 
