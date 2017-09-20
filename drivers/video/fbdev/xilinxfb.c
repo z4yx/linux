@@ -303,7 +303,7 @@ static void dma_cparea(struct fb_info *p, const struct fb_copyarea *area){
 	}
 	if (retry_times == 0) {
 		pr_warning("lockup - turning off hardware acceleration\n");
-		pr_warning("rd_ctl=%x; wr_ctl=%x", 
+		pr_warning("rd_ctl=%x; wr_ctl=%x",
 			xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FBMBUF_RD),
 			xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FBMBUF_WR)
 		);
@@ -315,6 +315,26 @@ static void dma_cparea(struct fb_info *p, const struct fb_copyarea *area){
 	if ((dy == sy && dx > sx) || (dy > sy)) {
 		return cfb_copyarea(p, area);
 	}
+	/* one is odd and the other is even */
+	if ((sx & 1) != (dx & 1)){
+		pr_info("unalligned\n");
+		return cfb_copyarea(p, area);
+	}
+	if (sx & 1){
+		struct fb_copyarea  ca = {
+			.dx = dx,
+			.dy = dy,
+			.width = 1,
+			.height = height,
+			.sx = sx,
+			.sy = sy
+		};
+		cfb_copyarea(p, &ca);
+		dx++; sx++;
+		width--;
+		pr_info("unalligned, both odd\n");
+	}
+
 	base = drvdata->fb_phys;
 	src = base + (p->fix.line_length) * sy + BYTES_PER_PIXEL * sx;
 	dst = base + (p->fix.line_length) * dy + BYTES_PER_PIXEL * dx;
@@ -326,7 +346,7 @@ static void dma_cparea(struct fb_info *p, const struct fb_copyarea *area){
 	xilinx_dma_out32(drvdata, XILINX_FRMBUF_HEIGHT_OFFSET, height, XILINX_FBMBUF_WR);
 	xilinx_dma_out32(drvdata, XILINX_FRMBUF_STRIDE_OFFSET, p->fix.line_length, XILINX_FBMBUF_RD);
 	xilinx_dma_out32(drvdata, XILINX_FRMBUF_STRIDE_OFFSET, p->fix.line_length, XILINX_FBMBUF_WR);
-	
+
 	xilinx_dma_set(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FRMBUF_CTRL_AP_START, XILINX_FBMBUF_RD);
 	xilinx_dma_set(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FRMBUF_CTRL_AP_START, XILINX_FBMBUF_WR);
 	exit_times++;
@@ -442,7 +462,7 @@ static int xilinxfb_assign(struct platform_device *pdev,
 			drvdata->reg_dma_wr = drvdata->reg_dma_rd = NULL;
 			drvdata->dma_en = 0;
 		}else{
-			drvdata->dma_en = 0;
+			drvdata->dma_en = 1;
 		}
 	}
 
