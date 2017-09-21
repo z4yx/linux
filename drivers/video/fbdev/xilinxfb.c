@@ -105,7 +105,7 @@ static struct xilinxfb_platform_data xilinx_fb_default_pdata = {
 	.xres = 640,
 	.yres = 480,
 	.xvirt = 1024,
-	.yvirt = 480,
+	.yvirt = 512,
 };
 
 /*
@@ -281,6 +281,7 @@ static void dma_cparea(struct fb_info *p, const struct fb_copyarea *area){
 	u32 dx = area->dx, dy = area->dy, sx = area->sx, sy = area->sy;
 	u32 height = area->height, width = area->width;
 	dma_addr_t base, dst, src;
+	int h_idx;
 	int retry_times;
 
 	if(enter_times%16 == 0){
@@ -288,26 +289,6 @@ static void dma_cparea(struct fb_info *p, const struct fb_copyarea *area){
 	}
 	enter_times++;
 	if (!drvdata->dma_en){
-		return cfb_copyarea(p, area);
-	}
-	/* Wait for last transfer finish */
-	retry_times = 1000000;
-	while (--retry_times > 0) {
-		if((xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET,
-			  XILINX_FBMBUF_RD) & XILINX_FRMBUF_CTRL_AP_IDLE) &&
-	     (xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET,
- 			  XILINX_FBMBUF_WR) & XILINX_FRMBUF_CTRL_AP_IDLE)){
-			break;
-		}
-		udelay(1);
-	}
-	if (retry_times == 0) {
-		pr_warning("lockup - turning off hardware acceleration\n");
-		pr_warning("rd_ctl=%x; wr_ctl=%x",
-			xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FBMBUF_RD),
-			xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FBMBUF_WR)
-		);
-		drvdata->dma_en = 0;
 		return cfb_copyarea(p, area);
 	}
 	/* if the beginning of the target area might overlap with the end of
@@ -334,22 +315,71 @@ static void dma_cparea(struct fb_info *p, const struct fb_copyarea *area){
 		width--;
 		pr_info("unalligned, both odd\n");
 	}
-
+	//pr_info("dx=%d, dy=%d, sx=%d, sy=%d, w=%d, h=%d\n", dx, dy, sx, sy, width, height);
 	base = drvdata->fb_phys;
 	src = base + (p->fix.line_length) * sy + BYTES_PER_PIXEL * sx;
 	dst = base + (p->fix.line_length) * dy + BYTES_PER_PIXEL * dx;
-	xilinx_dma_out32(drvdata, XILINX_FRMBUF_ADDR_OFFSET, src, XILINX_FBMBUF_RD);
-	xilinx_dma_out32(drvdata, XILINX_FRMBUF_ADDR_OFFSET, dst, XILINX_FBMBUF_WR);
+	u32 __iomem *vbase = drvdata->fb_virt;
+	/*
+	int i;
+	for(i = 0; i < width; i++){
+		*(vbase + sy * p->var.xres_virtual + sx + i) =
+		*(vbase + (sy + height - 1) * p->var.xres_virtual + sx + i) ^= 0x00ff0000;
+	}
+	for(i = 0; i < height; i++){
+		*(vbase + (sy + i) * p->var.xres_virtual + sx) =
+		*(vbase + (sy + i) * p->var.xres_virtual + sx + width - 1) ^= 0x00ff0000;
+	}
+	*/
 	xilinx_dma_out32(drvdata, XILINX_FRMBUF_WIDTH_OFFSET, width, XILINX_FBMBUF_RD);
 	xilinx_dma_out32(drvdata, XILINX_FRMBUF_WIDTH_OFFSET, width, XILINX_FBMBUF_WR);
-	xilinx_dma_out32(drvdata, XILINX_FRMBUF_HEIGHT_OFFSET, height, XILINX_FBMBUF_RD);
-	xilinx_dma_out32(drvdata, XILINX_FRMBUF_HEIGHT_OFFSET, height, XILINX_FBMBUF_WR);
 	xilinx_dma_out32(drvdata, XILINX_FRMBUF_STRIDE_OFFSET, p->fix.line_length, XILINX_FBMBUF_RD);
 	xilinx_dma_out32(drvdata, XILINX_FRMBUF_STRIDE_OFFSET, p->fix.line_length, XILINX_FBMBUF_WR);
+	xilinx_dma_out32(drvdata, XILINX_FRMBUF_HEIGHT_OFFSET, 1, XILINX_FBMBUF_RD);
+	xilinx_dma_out32(drvdata, XILINX_FRMBUF_HEIGHT_OFFSET, 1, XILINX_FBMBUF_WR);
+	for (h_idx = 0; h_idx < height; ++h_idx)
+	{
+		xilinx_dma_out32(drvdata, XILINX_FRMBUF_ADDR_OFFSET, src, XILINX_FBMBUF_RD);
+		xilinx_dma_out32(drvdata, XILINX_FRMBUF_ADDR_OFFSET, dst, XILINX_FBMBUF_WR);
 
-	xilinx_dma_set(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FRMBUF_CTRL_AP_START, XILINX_FBMBUF_RD);
-	xilinx_dma_set(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FRMBUF_CTRL_AP_START, XILINX_FBMBUF_WR);
-	exit_times++;
+		//udelay(50000);
+		xilinx_dma_set(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FRMBUF_CTRL_AP_START, XILINX_FBMBUF_RD);
+		xilinx_dma_set(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FRMBUF_CTRL_AP_START, XILINX_FBMBUF_WR);
+		exit_times++;
+		/* Wait for transfer finish */
+		retry_times = 1000000;
+		while (--retry_times > 0) {
+			if((xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET,
+				  XILINX_FBMBUF_RD) & XILINX_FRMBUF_CTRL_AP_IDLE) &&
+		     (xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET,
+	 			  XILINX_FBMBUF_WR) & XILINX_FRMBUF_CTRL_AP_IDLE)){
+				break;
+			}
+			udelay(1);
+		}
+		if (retry_times == 0) {
+			pr_warning("lockup - turning off hardware acceleration\n");
+			pr_warning("rd_ctl=%x; wr_ctl=%x",
+				xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FBMBUF_RD),
+				xilinx_dma_in32(drvdata, XILINX_FRMBUF_CTRL_OFFSET, XILINX_FBMBUF_WR)
+			);
+			drvdata->dma_en = 0;
+		}
+
+		src += p->fix.line_length;
+		dst += p->fix.line_length;
+	}
+	/*
+	for(i = 0; i < width; i++){
+		*(vbase + sy * p->var.xres_virtual + sx + i) =
+		*(vbase + (sy + height - 1) * p->var.xres_virtual + sx + i) ^= 0x0000ff00;
+	}
+	for(i = 0; i < height; i++){
+		*(vbase + (sy + i) * p->var.xres_virtual + sx) =
+		*(vbase + (sy + i) * p->var.xres_virtual + sx + width - 1) ^= 0x0000ff00;
+	}
+	udelay(50000);
+	*/
 }
 
 static int
