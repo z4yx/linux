@@ -10,7 +10,7 @@
 	chosen {
 		// bootargs = "cca=0 console=ttyS0,115200n8 rdinit=/sbin/init";
 		// bootargs = "cca=0 console=ttyS0,115200n8 rootfstype=jffs2 root=/dev/mtdblock1";
-		bootargs = "cca=0 console=ttyS0,115200n8 rootfstype=squashfs root=/dev/mtdblock1";
+		bootargs = "cca=0 console=ttyS0,115200n8 console=tty0 rootfstype=squashfs root=/dev/mtdblock1";
 	};
 
 	cpus {
@@ -65,21 +65,6 @@
 			reg = <0x1c060000 0x1000>;
 		};
 
-		sw_led: gpio@0xbfd01000 {
-			#gpio-cells = <2>;
-			compatible = "xlnx,xps-gpio-1.00.a";
-			gpio-controller ;
-			reg = < 0x1fd01000 0x1000 >;
-			xlnx,all-inputs = <0x0>;
-			xlnx,all-inputs-2 = <0xffffffff>;
-			xlnx,dout-default = <0x0>;
-			xlnx,dout-default-2 = <0x0>;
-			xlnx,gpio-width = <32>;
-			xlnx,gpio2-width = <32>;
-			xlnx,is-dual = <0x1>;
-			xlnx,tri-default = <0x0>;
-			xlnx,tri-default-2 = <0x0>;
-		};
 		axi_quad_spi@1e000000 {
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -110,7 +95,7 @@
 					};
 					partition@10000 {
 						label = "rootfs";
-						reg = <0x10000 0xff0000>;
+						reg = <0x10000 0x1ff0000>;
 					};
 					// partition@10000 {
 					// 	label = "kernel";
@@ -137,7 +122,10 @@
 			compatible = "xlnx,xps-tft-1.00.a";
 			//interrupt-parent = <&axi_intc>;
 			//interrupts = <1 0>;
-			reg = <0x1c090000 0x1000>;
+			reg = <0x1c090000 0x1000>,
+					<0x1c091000 0x1000>,
+					<0x1c092000 0x1000>,
+					<0x1fd0f028 0x4>;
 			xlnx,dcr-splb-slave-if = <0x1>;
 			resolution = <640 480>;
 			virtual-resolution = <1024 480>;
