@@ -15,6 +15,12 @@ config DEVMEM
 	  memory.
 	  When in doubt, say "Y".
 
+config NAIVELCD
+	tristate "naivelcd support"
+	default n
+	help
+	  naivelcd support
+
 config DEVKMEM
 	bool "/dev/kmem virtual device support"
 	default y
@@ -612,4 +618,3 @@ config TILE_SROM
 source "drivers/char/xillybus/Kconfig"
 
 endmenu
-
