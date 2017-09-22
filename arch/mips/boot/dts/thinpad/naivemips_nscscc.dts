@@ -40,14 +40,14 @@
 		interrupt-controller;
 		compatible = "mti,cpu-interrupt-controller";
 	};
-	
+
 	soc{
 		compatible = "simple-bus";
 		#address-cells = <1>;
 		#size-cells = <1>;
 		#interrupt-cells = <1>;
 		ranges;
-		
+
 		serial0: serial@0xbfd03000 {
 			device_type = "serial";
 			compatible = "ns16550a";
@@ -59,9 +59,9 @@
 			interrupt-parent = <&cpuintc>;
 			interrupts = <4>;
 		};
-		
+
 		lcd0: lcd@0x1c060000 {
-			compatible = "lcd";
+			compatible = "lcd,naive";
 			reg = <0x1c060000 0x1000>;
 		};
 
@@ -166,7 +166,7 @@
 		};
 	};
 
-	
+
 };
 
 &ext {

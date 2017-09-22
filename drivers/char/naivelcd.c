@@ -29,7 +29,7 @@
 #define BYTES_PER_PIXEL 2
 
 static int    majorNumber;
-static dev_t dev_num;
+static struct class  *naivelcd_class;
 
 static struct naivelcd_drvdata {
   struct cdev cdev;
@@ -37,7 +37,7 @@ static struct naivelcd_drvdata {
   phys_addr_t	regs_phys;
   void __iomem	*regs;
   u32 xres, yres;
-} naivelcds[MAX_LCD_NUM];
+} *naivelcds[MAX_LCD_NUM];
 
 static struct naivelcd_drvdata default_naivelcd_drvdata = {
  .xres = 800,
@@ -50,6 +50,7 @@ static void nt35510_out32(const struct naivelcd_drvdata *drvdata,
                            u32 offset, u32 val)
 {
   iowrite32(val, drvdata->regs + (offset << 2));
+  //pr_info("nt35510_out32: off=0x%02x val=0x%04x\n", offset, val);
 }
 
 static void nt35510_init(const struct naivelcd_drvdata *drvdata){
@@ -494,14 +495,15 @@ static int naivelcd_open(struct inode *inode, struct file *file)
    int num = MINOR(inode->i_rdev);
    struct naivelcd_drvdata *drvdata;
 
-   if (num >= MAX_LCD_NUM)
+   if (num >= MAX_LCD_NUM || !naivelcds[num])
        return -ENODEV;
-   drvdata = &naivelcds[num];
+   drvdata = naivelcds[num];
    if(drvdata->isOpen){
      return -EBUSY;
    }
    drvdata->isOpen = 1;
    file->private_data = drvdata;
+   file->f_pos = 0;
    return 0;
 }
 
@@ -521,6 +523,7 @@ static ssize_t naivelcd_write(struct file *file, const char __user *buf, size_t 
   int ret = 0;
   struct naivelcd_drvdata *drvdata = file->private_data;
 
+  //pr_info("naivelcd_write: p=%ld, count=%d\n", p, count);
   if (p >= drvdata->xres * drvdata->yres)
     return 0;
   if (count > drvdata->xres * drvdata->yres - p)
@@ -543,6 +546,7 @@ static ssize_t naivelcd_write(struct file *file, const char __user *buf, size_t 
     ret = count * BYTES_PER_PIXEL;
   }
   kfree(data);
+  //pr_info("naivelcd_write: ret=%d\n", ret);
   return ret;
 }
 
@@ -564,6 +568,7 @@ static loff_t naivelcd_llseek(struct file *file, loff_t offset, int whence)
   default:
     return -EINVAL;
   }
+  //pr_info("naivelcd_llseek: opos=%lld, npos=%lld, tol=%d\n", file->f_pos, newpos, drvdata->xres * drvdata->yres * BYTES_PER_PIXEL);
   if (newpos % BYTES_PER_PIXEL != 0){
     return -EINVAL;
   }
@@ -603,18 +608,21 @@ static int naivelcd_of_probe(struct platform_device *pdev)
   nt35510_init(drvdata);
   // Register the device driver
 
-  cdev_init((struct cdev *) drvdata, &fops);
-  drvdata->cdev.owner = THIS_MODULE;
-  cdev_add((struct cdev *)drvdata, MKDEV(majorNumber, 0), 1);
+  device_create(naivelcd_class, NULL, MKDEV(majorNumber, 0), NULL, "naivelcd0");
+  naivelcds[0] = drvdata;
   printk(KERN_INFO "naivelcd: device created correctly\n"); // Made it! device was initialized
-  
+
   return 0;
 }
 
  static int naivelcd_remove(struct platform_device *pdev)
  {
  	struct naivelcd_drvdata *drvdata = platform_get_drvdata(pdev);
-  cdev_del((struct cdev *)drvdata);
+  if(drvdata->isOpen){
+    return -EBUSY;
+  }
+  device_destroy(naivelcd_class, MKDEV(majorNumber, 0));
+  naivelcds[0] = NULL;
  	return 0;
  }
 
@@ -640,23 +648,35 @@ static int naivelcd_of_probe(struct platform_device *pdev)
  };
  module_platform_driver(naivelcd_driver);
 
+static char *naivelcd_devnode(struct device *dev, umode_t *mode)
+{
+	if (mode)
+		*mode = 0200;
+	return NULL;
+}
+
  static int __init naivelcd_init(void){
    int ret;
    printk(KERN_INFO "naivelcd: Initializing the naivelcd\n");
 
    // Try to dynamically allocate a major number for the device -- more difficult but worth it
-   ret = alloc_chrdev_region(&dev_num, 0, MAX_LCD_NUM, DRV_NAME);
-   if (ret < 0){
+   majorNumber = register_chrdev(0, DRV_NAME, &fops);
+   if (majorNumber < 0){
       printk(KERN_ALERT "naivelcd failed to register a major number\n");
       return ret;
    }
-   majorNumber = MAJOR(dev_num);
+   naivelcd_class = class_create(THIS_MODULE, "lcd");
+   naivelcd_class->devnode = naivelcd_devnode;
+   if (IS_ERR(naivelcd_class))
+    return PTR_ERR(naivelcd_class);
    printk(KERN_INFO "naivelcd: registered correctly with major number %d\n", majorNumber);
 
    return 0;
 }
 static void __exit naivelcd_exit(void){
-  unregister_chrdev_region(dev_num, MAX_LCD_NUM);
+  class_unregister(naivelcd_class);
+  class_destroy(naivelcd_class);
+  unregister_chrdev(majorNumber, DRV_NAME);
   printk(KERN_INFO "naivelce: unregistered\n");
 }
 
