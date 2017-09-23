@@ -37,11 +37,13 @@ static struct naivelcd_drvdata {
   phys_addr_t	regs_phys;
   void __iomem	*regs;
   u32 xres, yres;
+  loff_t curr_off;
+
 } *naivelcds[MAX_LCD_NUM];
 
 static struct naivelcd_drvdata default_naivelcd_drvdata = {
- .xres = 800,
- .yres = 480,
+ .xres = 480,
+ .yres = 800,
  .isOpen = 0,
 };
 
@@ -502,6 +504,7 @@ static int naivelcd_open(struct inode *inode, struct file *file)
      return -EBUSY;
    }
    drvdata->isOpen = 1;
+   drvdata->curr_off = 0;
    file->private_data = drvdata;
    file->f_pos = 0;
    return 0;
@@ -517,11 +520,11 @@ static int naivelcd_release(struct inode *inode, struct file *file)
 
 static ssize_t naivelcd_write(struct file *file, const char __user *buf, size_t size, loff_t *poss)
 {
-  unsigned long p = *poss / BYTES_PER_PIXEL;
+  struct naivelcd_drvdata *drvdata = file->private_data;
+  unsigned long p = drvdata->curr_off / BYTES_PER_PIXEL;
   unsigned int count = size / BYTES_PER_PIXEL;
   u16 *data;
   int ret = 0;
-  struct naivelcd_drvdata *drvdata = file->private_data;
 
   //pr_info("naivelcd_write: p=%ld, count=%d\n", p, count);
   if (p >= drvdata->xres * drvdata->yres)
@@ -538,12 +541,17 @@ static ssize_t naivelcd_write(struct file *file, const char __user *buf, size_t 
     ret = -EFAULT;
   } else {
     int i;
+    ret = 0;
     nt35510_seek_point(drvdata, p % drvdata->xres , p / drvdata->xres);
-    nt35510_out32(drvdata, NT35510_INST_OFFSET, 0x2C00);
-    for(i = 0; i < count; i ++){
-      nt35510_out32(drvdata, NT35510_DATA_OFFSET, data[i]);
+    if(count > 0){
+      nt35510_out32(drvdata, NT35510_INST_OFFSET, 0x2C00);
+      for(i = 0; i < count; i ++){
+        nt35510_out32(drvdata, NT35510_DATA_OFFSET, data[i]);
+        ret += BYTES_PER_PIXEL;
+      }
     }
-    ret = count * BYTES_PER_PIXEL;
+    file->f_pos += ret;
+    drvdata->curr_off += ret;
   }
   kfree(data);
   //pr_info("naivelcd_write: ret=%d\n", ret);
@@ -576,6 +584,7 @@ static loff_t naivelcd_llseek(struct file *file, loff_t offset, int whence)
     return -EINVAL;
 
   file->f_pos = newpos;
+  drvdata->curr_off = newpos;
   return newpos;
 }
 
@@ -610,7 +619,7 @@ static int naivelcd_of_probe(struct platform_device *pdev)
 
   device_create(naivelcd_class, NULL, MKDEV(majorNumber, 0), NULL, "naivelcd0");
   naivelcds[0] = drvdata;
-  printk(KERN_INFO "naivelcd: device created correctly\n"); // Made it! device was initialized
+  printk(KERN_INFO "naivelcd: device created correctly, reg=%p\n", drvdata->regs); // Made it! device was initialized
 
   return 0;
 }
