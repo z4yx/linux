@@ -547,11 +547,13 @@ static ssize_t naivelcd_write(struct file *file, const char __user *buf, size_t 
       nt35510_out32(drvdata, NT35510_INST_OFFSET, 0x2C00);
       for(i = 0; i < count; i ++){
         nt35510_out32(drvdata, NT35510_DATA_OFFSET, data[i]);
-        ret += BYTES_PER_PIXEL;
       }
+      ret = BYTES_PER_PIXEL * count;
+    } else {
+      ret = 0;
     }
-    file->f_pos += ret;
-    drvdata->curr_off += ret;
+    file->f_pos +=  BYTES_PER_PIXEL * count;
+    drvdata->curr_off += BYTES_PER_PIXEL * count;
   }
   kfree(data);
   //pr_info("naivelcd_write: ret=%d\n", ret);
