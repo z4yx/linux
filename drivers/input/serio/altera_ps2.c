@@ -98,13 +98,6 @@ static int altera_ps2_probe(struct platform_device *pdev)
 	if (irq < 0)
 		return -ENXIO;
 
-	error = devm_request_irq(&pdev->dev, irq, altera_ps2_rxint, 0,
-				 pdev->name, ps2if);
-	if (error) {
-		dev_err(&pdev->dev, "could not request IRQ %d\n", irq);
-		return error;
-	}
-
 	serio = kzalloc(sizeof(struct serio), GFP_KERNEL);
 	if (!serio)
 		return -ENOMEM;
@@ -118,6 +111,14 @@ static int altera_ps2_probe(struct platform_device *pdev)
 	serio->port_data	= ps2if;
 	serio->dev.parent	= &pdev->dev;
 	ps2if->io		= serio;
+	pr_info("ps2if->io=%p\n", ps2if->io);
+
+	error = devm_request_irq(&pdev->dev, irq, altera_ps2_rxint, 0,
+				 pdev->name, ps2if);
+	if (error) {
+		dev_err(&pdev->dev, "could not request IRQ %d\n", irq);
+		return error;
+	}
 
 	dev_info(&pdev->dev, "base %p, irq %d\n", ps2if->base, irq);
 
