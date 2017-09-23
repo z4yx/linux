@@ -8,9 +8,8 @@
 	#size-cells = <1>;
 
 	chosen {
-		// bootargs = "cca=0 console=ttyS0,115200n8 rdinit=/sbin/init";
-		// bootargs = "cca=0 console=ttyS0,115200n8 rootfstype=jffs2 root=/dev/mtdblock1";
-		bootargs = "cca=0 console=ttyS0,115200n8 console=tty0 rootfstype=squashfs root=/dev/mtdblock1";
+		//bootargs = "cca=0 console=tty1 console=ttyS0,115200n8 rdinit=/bin/sh";
+		bootargs = "cca=0 console=tty1 console=ttyS0,115200n8 rootfstype=squashfs root=/dev/mtdblock1";
 	};
 
 	cpus {
