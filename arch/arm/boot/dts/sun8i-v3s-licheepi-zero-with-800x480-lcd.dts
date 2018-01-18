@@ -1,0 +1,11 @@
+/*
+ * Copyright (C) 2018 Icenowy Zheng <icenowy@aosc.io>
+ *
+ * SPDX-License-Identifier: (GPL-2.0+ OR X11)
+ */
+
+#include "sun8i-v3s-licheepi-zero-with-lcd.dtsi"
+
+&panel {
+	compatible = "urt,umsh-8596md-t", "simple-panel";
+};
