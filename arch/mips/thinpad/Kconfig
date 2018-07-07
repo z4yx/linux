@@ -15,4 +15,7 @@ config DE2I_CYCLONE4
 config FPGA_A7_NSCSCC
     bool "FPGA-A7 board for NSCSCC"
 
+config FPGA_K7_EES
+    bool "E-elements board with Kintex-7 FPGA"
+
 endchoice

@@ -1,0 +1,99 @@
+/dts-v1/;
+
+
+/ {
+	compatible = "Tsinghua,NaiveMIPS,Thinpad";
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	chosen {
+		bootargs = "console=ttyS0,115200n8";
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "mips,4Kc";
+			clocks	= <&ext>;
+			reg = <0>;
+		};
+	};
+
+	ext: ext {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+	};
+
+	memory {
+		device_type = "memory";
+		reg = <0x0 0x800000>;
+	};
+
+	cpuintc: interrupt-controller@0 {
+		#address-cells = <0>;
+		#interrupt-cells = <1>;
+		interrupt-controller;
+		compatible = "mti,cpu-interrupt-controller";
+	};
+	
+	soc{
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		#interrupt-cells = <1>;
+		ranges;
+		
+		serial0: serial@0x1fd003F8 {
+			device_type = "serial";
+			compatible = "tsinghua,naivemips-uart";
+			reg = <0x1fd003F8 8>;
+			clock-frequency = <1843200>;
+			interrupt-parent = <&cpuintc>;
+			interrupts = <4>;
+		};
+		axi_intc_0: interrupt-controller@1c080000 {
+			#interrupt-cells = <2>;
+			compatible = "xlnx,xps-intc-1.00.a";
+			interrupt-controller;
+			interrupt-parent = <&cpuintc>;
+			interrupts = <2>;
+			reg = <0x1c032000 0x2000>;
+			xlnx,kind-of-intr = <0x1>;
+			xlnx,num-intr-inputs = <0x1>;
+		};
+		axi_ethernetlite: ethernet@1c030000 {
+			compatible = "xlnx,xps-ethernetlite-3.00.a";
+			device_type = "network";
+			local-mac-address = [08 86 4C 0D F7 09];
+			phy-handle = <&phy0>;
+			reg = <0x1c030000 0x2000>;
+			xlnx,duplex = <0x1>;
+			xlnx,include-global-buffers = <0x1>;
+			xlnx,include-internal-loopback = <0x0>;
+			xlnx,include-mdio = <0x1>;
+			xlnx,instance = "axi_ethernetlite_inst";
+			xlnx,rx-ping-pong = <0x1>;
+			xlnx,s-axi-id-width = <0x1>;
+			xlnx,tx-ping-pong = <0x1>;
+			xlnx,use-internal = <0x0>;
+			interrupt-parent = <&axi_intc_0>;
+			interrupts = <0 2>; //the 2nd value is not used
+			mdio {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				phy0: phy@1 {
+					device_type = "ethernet-phy";
+					reg = <1>;
+				} ;
+			} ;
+	    } ;
+	};
+
+	
+};
+
+&ext {
+	clock-frequency = <50000000>;
+};
