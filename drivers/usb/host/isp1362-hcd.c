@@ -37,7 +37,7 @@
  * recovery time (MSCx = 0x7f8c) with a memory clock of 99.53 MHz.
  */
 
-#undef ISP1362_DEBUG
+#define ISP1362_DEBUG
 
 /*
  * The PXA255 UDC apparently doesn't handle GET_STATUS, GET_CONFIG and
@@ -57,7 +57,7 @@
 /* This enables a memory test on the ISP1362 chip memory to make sure the
  * chip access timing is correct.
  */
-#undef CHIP_BUFFER_TEST
+#define CHIP_BUFFER_TEST
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -84,7 +84,7 @@
 #include <asm/byteorder.h>
 #include <asm/unaligned.h>
 
-static int dbg_level;
+static int dbg_level=2;
 #ifdef ISP1362_DEBUG
 module_param(dbg_level, int, 0644);
 #else
@@ -2339,7 +2339,26 @@ static int isp1362_hc_reset(struct usb_hcd *hcd)
 	} else
 		isp1362_sw_reset(isp1362_hcd);
 
+	// isp1362_write_reg16(isp1362_hcd, HCHWCFG, HCHWCFG_DISABLE_SUSPEND|HCHWCFG_DBWIDTH(1))
+	isp1362_write_reg32(isp1362_hcd, HCCONTROL, OHCI_USB_OPER|OHCI_CTRL_RWC|OHCI_CTRL_RWE);
+
+    unsigned int cnt = 0, error = 0;
+    unsigned int test_data;
+    do
+    {
+        isp1362_write_reg16(isp1362_hcd, HCSCRATCH, cnt);
+        test_data = isp1362_read_reg16(isp1362_hcd,HCSCRATCH);
+        if (test_data != cnt)
+        {
+            pr_info("\nError Encountered!!\n");
+            pr_info("\nWrite: %x, Read: %x\n", cnt, test_data);
+            error++;
+        }
+        cnt++;
+    } while (cnt < 0xFFFF);
+
 	/* chip has been reset. First we need to see a clock */
+	// unsigned long begin = jiffies;
 	t = jiffies + msecs_to_jiffies(timeout);
 	while (!clkrdy && time_before_eq(jiffies, t)) {
 		spin_lock_irqsave(&isp1362_hcd->lock, flags);
@@ -2348,6 +2367,9 @@ static int isp1362_hc_reset(struct usb_hcd *hcd)
 		if (!clkrdy)
 			msleep(4);
 	}
+	// unsigned long end = jiffies;
+	// pr_info("j %lu %u\n", end-begin, jiffies_to_msecs(end-begin));
+	isp1362_show_regs(isp1362_hcd);
 
 	spin_lock_irqsave(&isp1362_hcd->lock, flags);
 	isp1362_write_reg16(isp1362_hcd, HCuPINT, HCuPINT_CLKRDY);
