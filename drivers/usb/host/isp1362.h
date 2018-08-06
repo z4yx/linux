@@ -57,7 +57,7 @@ static inline void delayed_insw(unsigned int addr, void *buf, int len)
 #define USE_PLATFORM_DELAY	0
 #define USE_NDELAY		0
 
-#define DUMMY_DELAY_ACCESS do {} while (0)
+#define DUMMY_DELAY_ACCESS do{volatile int i;for(i=0;i<3;i++);}while(0)
 
 #endif
 
